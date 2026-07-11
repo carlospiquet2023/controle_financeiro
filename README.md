@@ -1,6 +1,6 @@
 # Finora
 
-Controle financeiro familiar, responsivo e pronto para produção. Troca a planilha mensal por uma base histórica: despesas, receitas, cartões, parcelas, valores a receber e projeções ficam ligados entre si.
+Central financeira familiar criada para responder quatro perguntas sem ambiguidade: quanto a família paga no mês, em qual cartão, quem precisa devolver e quanto já está comprometido no futuro.
 
 ## O que está entregue
 
@@ -8,10 +8,14 @@ Controle financeiro familiar, responsivo e pronto para produção. Troca a plani
 - Papéis de acesso e trilha de auditoria para lançamentos.
 - Cartões, contas, categorias, pessoas e divisões de despesas modelados no PostgreSQL.
 - Motor de parcelas que gera as competências futuras e preserva a soma exata em centavos.
-- Painel com compromissos do mês, projeção de seis meses, cartões, pendências e valores a receber.
+- Central mensal com total a pagar, pago, pendente, acertos familiares e projeção dos próximos 12 meses.
+- Faturas por cartão calculadas pelas compras do mês. Limite de crédito é apenas informação secundária.
+- Navegação real entre meses, filtros de lançamentos e experiência responsiva para notebook, desktop e celular.
+- Cadastros funcionais de cartões, contas, pessoas e categorias.
 - Endpoint de upload temporário para comprovantes no Cloudflare R2; as chaves nunca são expostas ao navegador.
 - Assistente Groq para transformar texto livre em lançamento estruturado; ele sugere e o usuário confirma antes de gravar.
-- Importador da planilha de julho/2026, incluindo leitura das cores como apoio somente na migração inicial.
+- Importador conciliado de Excel/CSV: reconhece fórmulas, cores, parcelas e totais por cartão da planilha original.
+- O arquivo original de cada importação é preservado no R2, o lote fica auditável e pode ser desfeito sem afetar lançamentos manuais.
 - Docker, migration versionada, health check e configuração Railway.
 
 ## Executar localmente
@@ -31,7 +35,11 @@ $env:IMPORT_OWNER_EMAIL="seu-email@exemplo.com"
 npm run import:workbook -- "C:\Users\pique\Desktop\controle_finaceiro\Planilha-dividas julho.xlsx"
 ```
 
-O importador cria os cartões identificáveis pela cor, gera parcelas futuras a partir de julho/2026 e é idempotente. Registros sem cor devem ser revisados no painel antes de serem considerados definitivos.
+O importador exige que o total das linhas seja idêntico ao resumo por cartão. Ele cria inclusive cartões zerados, gera as parcelas restantes, projeta despesas marcadas como `FIXO` por 12 meses e mantém o grupo “Não identificado” separado para revisão. Para substituir uma importação antiga com erro:
+
+```powershell
+npm run import:workbook -- "C:\caminho\Planilha-dividas julho.xlsx" --replace-legacy
+```
 
 ## Railway
 
@@ -46,8 +54,13 @@ No serviço de aplicação, configure:
 | `R2_PUBLIC_URL` | opcional, URL pública do bucket/CDN |
 | `GROQ_API_KEY`, `GROQ_MODEL` | chave e modelo Groq para o preenchimento inteligente |
 
-O Railway usa `Dockerfile`, aplica a migration no start e monitora `/api/health/ready`. Nunca suba `.env`, planilhas ou chaves para o GitHub.
+O Railway usa `Dockerfile`, aplica as migrations antes de iniciar e monitora `/api/health/ready`. Nunca suba `.env`, planilhas ou chaves para o GitHub.
 
-## Próximos incrementos de produto
+## Garantias da importação
 
-A estrutura já suporta as próximas telas: wizard de importação no navegador, pagamentos parciais, recorrências com geração mensal, notificações, 2FA TOTP e leitura OCR de comprovantes. Essas evoluções podem ser inseridas sem alterar o modelo financeiro central.
+- valores monetários persistidos como `Decimal(14,2)` no PostgreSQL;
+- comparação em centavos, sem aceitar diferenças de ponto flutuante;
+- hash SHA-256 para bloquear o mesmo arquivo duas vezes;
+- vínculo de cada lançamento ao lote que o criou;
+- trilha de auditoria para importar, desfazer, pagar, cancelar e revisar cartão;
+- isolamento por grupo familiar em todas as ações do servidor.

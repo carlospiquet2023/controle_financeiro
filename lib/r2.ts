@@ -10,3 +10,9 @@ function client() {
 export async function signedUploadUrl(key: string, contentType: string) {
   return getSignedUrl(client(), new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: key, ContentType: contentType }), { expiresIn: 300 });
 }
+
+export async function uploadObject(key: string, body: Uint8Array, contentType: string, metadata?: Record<string, string>) {
+  if (!process.env.R2_BUCKET) throw new Error("Armazenamento de arquivos não configurado.");
+  await client().send(new PutObjectCommand({ Bucket: process.env.R2_BUCKET, Key: key, Body: body, ContentType: contentType, Metadata: metadata }));
+  return key;
+}

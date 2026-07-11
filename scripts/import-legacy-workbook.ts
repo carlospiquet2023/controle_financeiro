@@ -1,44 +1,88 @@
-import * as XLSX from "xlsx";
+import { createHash, randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
+import { basename } from "node:path";
 import { PrismaClient } from "@prisma/client";
-import { parseInstallment, parseBrazilianMoney } from "../lib/finance";
+import { parseWorkbook } from "../lib/workbook";
+import { uploadObject } from "../lib/r2";
 
-const prisma = new PrismaClient();
-const path = process.argv[2];
-const email = process.env.IMPORT_OWNER_EMAIL;
-if (!path || !email) throw new Error("Uso: IMPORT_OWNER_EMAIL=seu@email npm run import:workbook -- caminho/planilha.xlsx");
+const workbookPath = process.argv.find((argument) => /\.(xlsx|xls|csv)$/i.test(argument));
+const replaceLegacy = process.argv.includes("--replace-legacy");
+if (!workbookPath) throw new Error("Uso: npm run import:workbook -- caminho/planilha.xlsx [--replace-legacy]");
 
-const cardsByColor: Record<string, { name: string; color: string; lastFour?: string }> = {
-  FFFFFF00: { name: "Casa Bahia", color: "#EAB308", lastFour: "4037" }, FFFF0000: { name: "Cartão Dom", color: "#E5484D" },
-  FF92D050: { name: "Caixa 6553", color: "#65A30D", lastFour: "6553" }, FF00FFFF: { name: "Caixa 4013", color: "#06B6D4", lastFour: "4013" },
-  FF00B0F0: { name: "Pernambucanas", color: "#0284C7" }, FF7030A0: { name: "Di Santini", color: "#7030A0" }, FF66FF: { name: "Ponto Mix", color: "#D946EF" },
-};
-const recurring = /fixo/i;
-function rgb(cell: XLSX.CellObject | undefined) { return (cell?.s as { fill?: { fgColor?: { rgb?: string } } } | undefined)?.fill?.fgColor?.rgb?.toUpperCase(); }
-function categoryFor(description: string) { const value = description.toLowerCase(); if (/99|corrida|pix/.test(value)) return "Transporte"; if (/comida|queijo|milho|japonesa/.test(value)) return "Alimentação"; if (/telefone|internet|anuidade/.test(value)) return "Assinaturas"; return "Outros"; }
+const databaseUrl = process.env.DATABASE_PUBLIC_URL || process.env.DATABASE_URL;
+if (!databaseUrl) throw new Error("DATABASE_PUBLIC_URL ou DATABASE_URL precisa estar configurada.");
+const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
-async function main() {
-  const user = await prisma.user.findUnique({ where: { email }, include: { memberships: true } });
-  if (!user?.memberships[0]) throw new Error("Não encontrei um grupo financeiro para IMPORT_OWNER_EMAIL.");
+async function main(path: string) {
+  const owners = await prisma.user.findMany({
+    where: process.env.IMPORT_OWNER_EMAIL ? { email: process.env.IMPORT_OWNER_EMAIL } : { memberships: { some: { role: "OWNER" } } },
+    include: { memberships: { where: { role: "OWNER" }, take: 1 } },
+  });
+  if (owners.length !== 1 || !owners[0].memberships[0]) throw new Error("Defina IMPORT_OWNER_EMAIL quando houver zero ou mais de um proprietário.");
+  const user = owners[0];
   const householdId = user.memberships[0].householdId;
-  const workbook = XLSX.readFile(path, { cellStyles: true, cellDates: true }); const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const cardCache = new Map<string, string>(); const categoryCache = new Map<string, string>();
-  async function cardId(meta: { name: string; color: string; lastFour?: string }) { if (!cardCache.has(meta.name)) { const card = await prisma.card.upsert({ where: { id: `legacy-${meta.name}` }, create: { id: `legacy-${meta.name}`, householdId, ...meta }, update: { color: meta.color } }); cardCache.set(meta.name, card.id); } return cardCache.get(meta.name)!; }
-  async function categoryId(name: string) { if (!categoryCache.has(name)) { const item = await prisma.category.upsert({ where: { householdId_name: { householdId, name } }, create: { householdId, name }, update: {} }); categoryCache.set(name, item.id); } return categoryCache.get(name)!; }
-  const rows = XLSX.utils.sheet_to_json<(string | number | undefined)[]>(sheet, { header: 1, defval: undefined }); let imported = 0;
-  for (let index = 3; index < rows.length; index++) {
-    const row = rows[index]; const description = String(row[0] ?? "").trim(); const value = parseBrazilianMoney(row[1]);
-    if (!description || value === null || value <= 0) continue;
-    const sheetRow = index + 1; const styleColor = rgb(sheet[`B${sheetRow}`]); const meta = styleColor ? cardsByColor[styleColor] : undefined;
-    const installment = parseInstallment(row[2]); const isRecurring = recurring.test(String(row[2] ?? "")); const count = isRecurring ? 1 : installment.total;
-    const current = isRecurring ? 1 : installment.current; const firstDate = new Date(2026, 6, 1);
-    const card = meta ? await cardId(meta) : null; const category = await categoryId(categoryFor(description));
-    for (let n = current; n <= count; n++) {
-      const competenceDate = new Date(firstDate.getFullYear(), firstDate.getMonth() + (n - current), 1);
-      const externalRef = `legacy-jul-2026-${sheetRow}-${n}`;
-      await prisma.transaction.upsert({ where: { id: externalRef }, create: { id: externalRef, externalRef, householdId, cardId: card, categoryId: category, type: "EXPENSE", status: n === current ? "PENDING" : "PLANNED", description: count > 1 ? `${description} · ${n}/${count}` : description, amount: value, totalAmount: value * count, competenceDate, installmentNumber: n, installmentCount: count, recurring: isRecurring, notes: String(row[4] ?? "").trim() || null }, update: {} });
-      imported++;
-    }
+  const file = readFileSync(path);
+  const sourceHash = createHash("sha256").update(file).digest("hex");
+  const parsed = parseWorkbook(file, "2026-07-01", basename(path));
+  if (!parsed.reconciled) throw new Error("Importação bloqueada: os totais por cartão não fecham.");
+  const existing = await prisma.importBatch.findFirst({ where: { householdId, sourceHash, status: "IMPORTED" } });
+  if (existing && !replaceLegacy) throw new Error("Esta planilha já possui um lote ativo.");
+
+  let sourceKey: string | null = existing?.sourceKey || null;
+  if (!sourceKey && process.env.R2_ACCOUNT_ID && process.env.R2_BUCKET) {
+    sourceKey = `households/${householdId}/imports/2026-07-01/${randomUUID()}.${basename(path).split(".").pop() || "xlsx"}`;
+    await uploadObject(sourceKey, file, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", { sha256: sourceHash, originalname: encodeURIComponent(basename(path)) });
   }
-  console.log(`Importação concluída: ${imported} lançamentos criados. Revise os registros sem cor e complemente vencimentos/pessoas.`);
+
+  const result = await prisma.$transaction(async (tx) => {
+    let removedTransactions = 0;
+    let removedCards = 0;
+    if (replaceLegacy) {
+      const activeBatches = await tx.importBatch.findMany({ where: { householdId, status: "IMPORTED" }, select: { id: true } });
+      for (const batch of activeBatches) {
+        const removed = await tx.transaction.deleteMany({ where: { importBatchId: batch.id } });
+        removedTransactions += removed.count;
+        await tx.importBatch.update({ where: { id: batch.id }, data: { status: "ROLLED_BACK", rolledBackAt: new Date() } });
+      }
+      const legacy = await tx.transaction.deleteMany({ where: { householdId, importBatchId: null, externalRef: { startsWith: "import-" } } });
+      removedTransactions += legacy.count;
+      const numericCards = await tx.card.findMany({ where: { householdId }, include: { _count: { select: { transactions: true } } } });
+      const removable = numericCards.filter((card) => /^\d+(?:\.\d+)?$/.test(card.name.trim()) && card._count.transactions === 0).map((card) => card.id);
+      if (removable.length) removedCards = (await tx.card.deleteMany({ where: { id: { in: removable } } })).count;
+    }
+
+    const batch = await tx.importBatch.create({ data: { householdId, actorId: user.id, fileName: basename(path), sourceKey, sourceHash, competenceDate: new Date("2026-07-01T12:00:00"), rowCount: parsed.rows.length, importedCount: 0, currentMonthTotal: parsed.calculatedTotal, reconciliation: { groups: parsed.groups, expectedTotal: parsed.expectedTotal, calculatedTotal: parsed.calculatedTotal } } });
+    const categoryCache = new Map<string, string>();
+    const cardCache = new Map<string, string>();
+    async function categoryId(name: string) {
+      if (!categoryCache.has(name)) { const item = await tx.category.upsert({ where: { householdId_name: { householdId, name } }, create: { householdId, name }, update: {} }); categoryCache.set(name, item.id); }
+      return categoryCache.get(name)!;
+    }
+    async function cardId(name?: string, color?: string) {
+      if (!name) return null;
+      if (!cardCache.has(name)) { const id = `import-card-${createHash("sha1").update(`${householdId}-${name}`).digest("hex").slice(0, 20)}`; const item = await tx.card.upsert({ where: { id }, create: { id, householdId, name, color: color || "#5269E8" }, update: { name, color: color || "#5269E8", active: true } }); cardCache.set(name, item.id); }
+      return cardCache.get(name)!;
+    }
+    for (const group of parsed.groups) if (group.cardName) await cardId(group.cardName, group.color);
+    let imported = 0;
+    for (const row of parsed.rows) {
+      const category = await categoryId(row.categoryName || "Outros");
+      const card = await cardId(row.cardName, row.cardColor);
+      const current = Math.min(row.installmentCurrent, row.installmentCount);
+      const occurrences = row.recurring ? 12 : row.installmentCount - current + 1;
+      const baseDate = new Date(`${row.competenceDate}T12:00:00`);
+      for (let offset = 0; offset < occurrences; offset++) {
+        const installment = row.recurring ? 1 : current + offset;
+        const id = `workbook-${createHash("sha1").update(`${householdId}|${sourceHash}|${row.sourceRow}|${offset}`).digest("hex").slice(0, 24)}`;
+        await tx.transaction.create({ data: { id, externalRef: id, importBatchId: batch.id, householdId, cardId: card, categoryId: category, type: row.type, status: offset === 0 ? "PENDING" : "PLANNED", description: row.recurring ? row.description : row.installmentCount > 1 ? `${row.description} · ${installment}/${row.installmentCount}` : row.description, amount: row.amount, totalAmount: row.recurring ? null : row.amount * row.installmentCount, competenceDate: new Date(baseDate.getFullYear(), baseDate.getMonth() + offset, 1), dueDate: row.dueDate ? new Date(`${row.dueDate}T12:00:00`) : null, installmentNumber: installment, installmentCount: row.installmentCount, recurring: row.recurring, notes: row.notes || null } });
+        imported++;
+      }
+    }
+    await tx.importBatch.update({ where: { id: batch.id }, data: { importedCount: imported } });
+    await tx.auditLog.create({ data: { householdId, actorId: user.id, entity: "Import", entityId: batch.id, action: replaceLegacy ? "REPLACE_LEGACY_IMPORT" : "IMPORT_TRANSACTIONS", after: { imported, removedTransactions, removedCards, currentMonthTotal: parsed.calculatedTotal, reconciled: true } } });
+    return { imported, removedTransactions, removedCards, batchId: batch.id };
+  });
+  console.log(JSON.stringify({ ok: true, rows: parsed.rows.length, currentMonthTotal: parsed.calculatedTotal, groups: parsed.groups.length, ...result }));
 }
-main().catch(error => { console.error(error); process.exitCode = 1; }).finally(() => prisma.$disconnect());
+
+main(workbookPath).catch((error) => { console.error(error instanceof Error ? error.message : error); process.exitCode = 1; }).finally(() => prisma.$disconnect());

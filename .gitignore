@@ -8,4 +8,5 @@ r2.md
 .railway
 *.log
 Planilha-dividas julho.xlsx
+~$*.xlsx
 coverage

@@ -50,6 +50,10 @@ enum AttachmentKind {
   INVOICE
   OTHER
 }
+enum ImportStatus {
+  IMPORTED
+  ROLLED_BACK
+}
 
 model User {
   id           String       @id @default(cuid())
@@ -74,6 +78,7 @@ model Household {
   categories  Category[]
   people      Person[]
   transactions Transaction[]
+  importBatches ImportBatch[]
   auditLogs   AuditLog[]
 }
 
@@ -163,6 +168,7 @@ model Transaction {
   cardId             String?
   categoryId         String?
   responsiblePersonId String?
+  importBatchId        String?
   type               TransactionType
   status             TransactionStatus @default(PENDING)
   description        String
@@ -186,10 +192,33 @@ model Transaction {
   card               Card?              @relation(fields: [cardId], references: [id], onDelete: SetNull)
   category           Category?          @relation(fields: [categoryId], references: [id], onDelete: SetNull)
   responsiblePerson  Person?            @relation("ResponsiblePerson", fields: [responsiblePersonId], references: [id], onDelete: SetNull)
+  importBatch         ImportBatch?       @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
   splits             Split[]
   attachments        Attachment[]
   @@index([householdId, competenceDate])
   @@index([cardId, dueDate])
+  @@index([importBatchId])
+}
+
+model ImportBatch {
+  id               String       @id @default(cuid())
+  householdId      String
+  actorId          String?
+  fileName         String
+  sourceKey        String?
+  sourceHash       String
+  competenceDate   DateTime
+  rowCount         Int
+  importedCount    Int
+  currentMonthTotal Decimal     @db.Decimal(14,2)
+  status           ImportStatus @default(IMPORTED)
+  reconciliation   Json?
+  createdAt        DateTime     @default(now())
+  rolledBackAt     DateTime?
+  household        Household    @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  transactions     Transaction[]
+  @@index([householdId, createdAt])
+  @@index([householdId, sourceHash])
 }
 
 model Split {

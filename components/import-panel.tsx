@@ -1,194 +1,111 @@
 "use client";
 
-import { useMemo, useState, useTransition } from "react";
-import * as XLSX from "xlsx";
-import { FileSpreadsheet, UploadCloud } from "lucide-react";
-import { importTransactions } from "@/app/actions";
+import { useState, useTransition } from "react";
+import { useRouter } from "next/navigation";
+import { AlertTriangle, CheckCircle2, FileSpreadsheet, History, RotateCcw, ShieldCheck, UploadCloud } from "lucide-react";
+import { importTransactions, rollbackImport } from "@/app/actions";
 import { isoDate, money } from "@/lib/format";
+import { parseWorkbook, type ParsedWorkbook } from "@/lib/workbook";
 
-type ImportRow = {
-  description: string;
-  amount: number;
-  type: "EXPENSE" | "INCOME";
-  competenceDate: string;
-  dueDate?: string;
-  categoryName?: string;
-  cardName?: string;
-  accountName?: string;
-  installmentCurrent: number;
-  installmentCount: number;
-  notes?: string;
-  source?: string;
-};
+type ImportHistory = { id: string; fileName: string; status: string; rowCount: number; importedCount: number; total: number; createdAt: string };
 
-type ImportPanelProps = {
-  onImported: () => void;
-};
-
-const today = new Date();
-
-export function ImportPanel({ onImported }: ImportPanelProps) {
+export function ImportPanel({ history, onImported }: { history: ImportHistory[]; onImported: () => void }) {
+  const router = useRouter();
+  const today = new Date();
   const [month, setMonth] = useState(isoDate(new Date(today.getFullYear(), today.getMonth(), 1)).slice(0, 7));
-  const [rows, setRows] = useState<ImportRow[]>([]);
-  const [fileName, setFileName] = useState("");
+  const [parsed, setParsed] = useState<ParsedWorkbook | null>(null);
+  const [file, setFile] = useState<File | null>(null);
   const [message, setMessage] = useState("");
   const [isPending, startTransition] = useTransition();
-  const total = useMemo(() => rows.reduce((sum, row) => sum + row.amount * Math.max(row.installmentCount - row.installmentCurrent + 1, 1), 0), [rows]);
 
-  async function handleFile(file?: File) {
-    setMessage("");
-    if (!file) return;
-    setFileName(file.name);
+  async function handleFile(nextFile?: File) {
+    setMessage(""); setParsed(null); setFile(nextFile || null);
+    if (!nextFile) return;
     try {
-      const buffer = await file.arrayBuffer();
-      const workbook = XLSX.read(buffer, { type: "array", cellDates: true });
-      const sheet = workbook.Sheets[workbook.SheetNames[0]];
-      const rawRows = XLSX.utils.sheet_to_json<unknown[]>(sheet, { header: 1, defval: "" });
-      const parsed = parseSheet(rawRows, `${month}-01`, file.name);
-      setRows(parsed);
-      setMessage(parsed.length ? `${parsed.length} linha(s) pronta(s) para importar.` : "Não encontrei linhas com descrição e valor nessa planilha.");
-    } catch {
-      setRows([]);
-      setMessage("Não consegui ler o arquivo. Use .xlsx, .xls ou .csv.");
+      const result = parseWorkbook(await nextFile.arrayBuffer(), `${month}-01`, nextFile.name);
+      setParsed(result);
+      setMessage(result.reconciled ? "Planilha lida e conciliada. Revise os grupos antes de confirmar." : "Os totais da planilha não fecham. A gravação foi bloqueada.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "Não consegui ler a planilha.");
     }
   }
 
   function submitImport() {
-    if (!rows.length) return;
+    if (!file || !parsed?.reconciled) return;
     startTransition(async () => {
-      const result = await importTransactions(rows);
-      if (result.error) {
-        setMessage(result.error);
-        return;
+      try {
+        setMessage("Guardando a planilha original no R2…");
+        const formData = new FormData(); formData.set("file", file);
+        const upload = await fetch("/api/import-file", { method: "POST", body: formData });
+        const stored = await upload.json();
+        if (!upload.ok) throw new Error(stored.error || "Não foi possível guardar o arquivo original.");
+        setMessage("Gravando os lançamentos conciliados…");
+        const result = await importTransactions({ ...parsed, fileName: file.name, sourceHash: stored.hash, sourceKey: stored.key });
+        if (result.error) throw new Error(result.error);
+        setParsed(null); setFile(null);
+        setMessage(`Importação concluída com segurança: ${result.imported || 0} lançamentos criados.`);
+        router.refresh(); onImported();
+      } catch (error) {
+        setMessage(error instanceof Error ? error.message : "A importação não foi concluída.");
       }
-      setMessage(`Importação concluída: ${result.imported || 0} lançamento(s), ${result.skipped || 0} repetido(s) ignorado(s).`);
-      setRows([]);
-      onImported();
+    });
+  }
+
+  function undo(batchId: string) {
+    if (!window.confirm("Desfazer este lote removerá somente os lançamentos criados por ele. Continuar?")) return;
+    startTransition(async () => {
+      const result = await rollbackImport(batchId);
+      setMessage(result.error || "Importação desfeita. O arquivo original continua preservado no R2.");
+      router.refresh();
     });
   }
 
   return (
-    <section className="panel import-panel">
-      <div className="panel-header">
-        <div>
-          <h2>Importar Excel ou CSV</h2>
-          <p>Traga a planilha antiga para dentro do sistema com conferência antes de gravar.</p>
+    <div className="import-layout">
+      <section className="panel import-panel">
+        <div className="section-heading">
+          <div className="section-icon mint"><FileSpreadsheet size={21} /></div>
+          <div><span className="kicker">ENTRADA SEGURA</span><h2>Importar e conciliar</h2><p>Nenhum valor é gravado até a soma das linhas bater com o resumo por cartão.</p></div>
         </div>
-      </div>
 
-      <div className="import-grid">
-        <label className="field">
-          <span>Mês de competência</span>
-          <input type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
-        </label>
-        <label className="upload-box">
-          <UploadCloud size={24} />
-          <b>{fileName || "Selecionar planilha"}</b>
-          <small>Arquivos .xlsx, .xls ou .csv</small>
-          <input accept=".xlsx,.xls,.csv" type="file" onChange={(event) => handleFile(event.target.files?.[0])} />
-        </label>
-      </div>
+        <div className="import-grid">
+          <label className="field"><span>Mês da fatura</span><input type="month" value={month} onChange={(event) => { setMonth(event.target.value); setParsed(null); setFile(null); setMessage(""); }} /></label>
+          <label className="upload-box">
+            <UploadCloud size={25} />
+            <b>{file?.name || "Escolher Excel ou CSV"}</b>
+            <small>O original será preservado no Cloudflare R2 · até 10 MB</small>
+            <input accept=".xlsx,.xls,.csv" type="file" onChange={(event) => handleFile(event.target.files?.[0])} />
+          </label>
+        </div>
 
-      {message && <p className="import-message">{message}</p>}
+        {message && <div className={`notice ${parsed && !parsed.reconciled ? "danger" : ""}`}>{parsed?.reconciled ? <CheckCircle2 size={17} /> : <AlertTriangle size={17} />}<span>{message}</span></div>}
 
-      {rows.length > 0 && (
-        <>
-          <div className="import-summary">
-            <span><FileSpreadsheet size={16} /> {rows.length} linha(s)</span>
-            <strong>{money(total)}</strong>
+        {parsed && <>
+          <div className="reconcile-summary">
+            <div><span>Total das linhas</span><strong>{money(parsed.calculatedTotal)}</strong></div>
+            <div><span>Total do resumo</span><strong>{money(parsed.expectedTotal)}</strong></div>
+            <div className={parsed.reconciled ? "reconciled" : "mismatch"}><span>Conciliação</span><strong>{parsed.reconciled ? "100% confere" : "Há diferença"}</strong></div>
           </div>
-          <div className="import-preview">
-            {rows.slice(0, 12).map((row, index) => (
-              <div className="import-row" key={`${row.description}-${index}`}>
-                <div>
-                  <b>{row.description}</b>
-                  <small>{row.categoryName || "Categoria automática"}{row.installmentCount > 1 ? ` · ${row.installmentCurrent}/${row.installmentCount}` : ""}</small>
-                </div>
-                <strong>{money(row.amount)}</strong>
-              </div>
-            ))}
+          <div className="reconcile-table" role="table" aria-label="Conciliação por cartão">
+            <div className="reconcile-head" role="row"><span>Cartão ou grupo</span><span>Itens</span><span>Planilha</span><span>Calculado</span><span>Status</span></div>
+            {parsed.groups.map((group) => <div className="reconcile-row" role="row" key={group.name}>
+              <span className="group-name"><i style={{ background: group.color }} />{group.name}{!group.cardName && <em>revisar</em>}</span>
+              <span>{group.rowCount}</span><span>{money(group.expectedTotal)}</span><span>{money(group.calculatedTotal)}</span>
+              <span className={group.matched ? "match" : "no-match"}>{group.matched ? <CheckCircle2 size={15} /> : <AlertTriangle size={15} />}{group.matched ? "Confere" : "Diverge"}</span>
+            </div>)}
           </div>
-          <button className="button primary import-submit" disabled={isPending} onClick={submitImport}>
-            {isPending ? "Importando..." : "Confirmar importação"}
-          </button>
-        </>
-      )}
-    </section>
+          <div className="import-footer"><div><ShieldCheck size={18} /><span><b>{parsed.rows.length} compras identificadas</b><small>{parsed.format === "FINORA_LEGACY" ? "Cores, parcelas e resumo reconhecidos" : "Formato tabular reconhecido"}</small></span></div><button className="button primary" disabled={!parsed.reconciled || isPending} onClick={submitImport}>{isPending ? "Processando…" : "Confirmar importação conciliada"}</button></div>
+        </>}
+      </section>
+
+      <section className="panel import-history">
+        <div className="section-heading compact"><div className="section-icon"><History size={19} /></div><div><h2>Histórico</h2><p>Cada lote pode ser rastreado e desfeito.</p></div></div>
+        <div className="history-list">{history.length ? history.map((item) => <div className="history-row" key={item.id}>
+          <div><b>{item.fileName}</b><small>{new Date(item.createdAt).toLocaleString("pt-BR")} · {item.rowCount} linhas</small></div>
+          <div><strong>{money(item.total)}</strong><span className={`batch-status ${item.status.toLowerCase()}`}>{item.status === "IMPORTED" ? "Importado" : "Desfeito"}</span></div>
+          {item.status === "IMPORTED" && <button className="icon-button" title="Desfazer lote" disabled={isPending} onClick={() => undo(item.id)}><RotateCcw size={16} /></button>}
+        </div>) : <div className="empty">Nenhuma importação registrada ainda.</div>}</div>
+      </section>
+    </div>
   );
-}
-
-function parseSheet(rows: unknown[][], competenceDate: string, source: string): ImportRow[] {
-  const headerIndex = rows.findIndex((row) => row.some((cell) => /descri|lan[cç]amento|valor/i.test(String(cell))));
-  if (headerIndex >= 0) return parseWithHeader(rows.slice(headerIndex), competenceDate, source);
-  return parseLegacyRows(rows, competenceDate, source);
-}
-
-function parseWithHeader(rows: unknown[][], competenceDate: string, source: string) {
-  const headers = rows[0].map((cell) => normalize(String(cell)));
-  return rows.slice(1).map((row) => rowFromColumns(row, headers, competenceDate, source)).filter(Boolean) as ImportRow[];
-}
-
-function rowFromColumns(row: unknown[], headers: string[], competenceDate: string, source: string): ImportRow | null {
-  const get = (...names: string[]) => {
-    const index = headers.findIndex((header) => names.some((name) => header.includes(name)));
-    return index >= 0 ? row[index] : "";
-  };
-  const description = String(get("descricao", "lancamento", "nome", "historico")).trim();
-  const amount = parseMoney(get("valor", "preco", "total"));
-  if (!description || amount === null || amount <= 0) return null;
-  const installment = parseInstallment(get("parcela", "parcelamento"));
-  const dueDate = parseDate(get("vencimento", "data"));
-  return {
-    description,
-    amount,
-    type: normalize(String(get("tipo"))).includes("receita") ? "INCOME" : "EXPENSE",
-    competenceDate,
-    dueDate,
-    categoryName: String(get("categoria")).trim() || undefined,
-    cardName: String(get("cartao")).trim() || undefined,
-    accountName: String(get("conta")).trim() || undefined,
-    installmentCurrent: installment.current,
-    installmentCount: installment.total,
-    notes: String(get("observacao", "obs", "nota")).trim() || undefined,
-    source,
-  };
-}
-
-function parseLegacyRows(rows: unknown[][], competenceDate: string, source: string) {
-  return rows.slice(3).map((row) => {
-    const description = String(row[0] ?? "").trim();
-    const amount = parseMoney(row[1]);
-    if (!description || amount === null || amount <= 0) return null;
-    const installment = parseInstallment(row[2]);
-    const notes = String(row[4] ?? "").trim();
-    return { description, amount, type: "EXPENSE" as const, competenceDate, installmentCurrent: installment.current, installmentCount: installment.total, notes: notes || undefined, source };
-  }).filter(Boolean) as ImportRow[];
-}
-
-function normalize(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
-}
-
-function parseMoney(value: unknown) {
-  if (typeof value === "number") return value;
-  const parsed = Number(String(value ?? "").replace(/R\$\s?/gi, "").replace(/\./g, "").replace(",", ".").trim());
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
-function parseInstallment(value: unknown) {
-  const match = String(value ?? "").match(/(\d+)\s*(?:de|\/)\s*(\d+)/i);
-  if (!match) return { current: 1, total: 1 };
-  return { current: Number(match[1]), total: Number(match[2]) };
-}
-
-function parseDate(value: unknown) {
-  if (value instanceof Date && !Number.isNaN(value.getTime())) return isoDate(value);
-  if (typeof value === "number") {
-    const parsed = XLSX.SSF.parse_date_code(value);
-    if (parsed) return isoDate(new Date(parsed.y, parsed.m - 1, parsed.d));
-  }
-  const match = String(value ?? "").match(/(\d{1,2})[/-](\d{1,2})[/-](\d{2,4})/);
-  if (!match) return undefined;
-  const year = Number(match[3].length === 2 ? `20${match[3]}` : match[3]);
-  return isoDate(new Date(year, Number(match[2]) - 1, Number(match[1])));
 }
