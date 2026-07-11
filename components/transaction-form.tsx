@@ -1,0 +1,23 @@
+"use client";
+import { useActionState, useEffect, useRef, useState } from "react";
+import { Sparkles, X } from "lucide-react";
+import { createTransaction } from "@/app/actions";
+import { isoDate } from "@/lib/format";
+
+type Option = { id: string; name: string };
+export function TransactionForm({ accounts, cards, categories, onClose }: { accounts: Option[]; cards: Option[]; categories: Option[]; onClose(): void }) {
+  const [state, action, pending] = useActionState(createTransaction, { error: undefined, success: undefined });
+  const [aiText, setAiText] = useState(""); const [aiError, setAiError] = useState(""); const [aiLoading, setAiLoading] = useState(false); const formRef = useRef<HTMLFormElement>(null);
+  useEffect(() => { if (state.success) onClose(); }, [state.success, onClose]);
+  async function draftWithAi() {
+    setAiError(""); if (aiText.trim().length < 8) return setAiError("Descreva a compra com um pouco mais de detalhe."); setAiLoading(true);
+    try {
+      const response = await fetch("/api/ai/draft-transaction", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text: aiText }) }); const data = await response.json(); if (!response.ok) throw new Error(data.error);
+      const draft = data.draft; const set = (name: string, value: string | number | null) => { const field = formRef.current?.elements.namedItem(name) as HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement | null; if (field && value !== null) field.value = String(value); };
+      set("description", draft.description); set("amount", draft.amount); set("type", draft.type); set("installmentCount", draft.installmentCount); set("competenceDate", draft.competenceDate || isoDate(new Date())); set("dueDate", draft.dueDate); set("cardId", draft.cardId); set("accountId", draft.accountId); set("categoryId", draft.categoryId); set("notes", draft.notes);
+    } catch (error) { setAiError(error instanceof Error ? error.message : "Não foi possível gerar a sugestão."); } finally { setAiLoading(false); }
+  }
+  return <div className="modal-backdrop" role="dialog" aria-modal="true"><section className="modal"><header><div><p className="eyebrow">NOVO LANÇAMENTO</p><h2>Registre um compromisso</h2></div><button className="icon-button" onClick={onClose}><X/></button></header>
+    <div className="ai-draft"><div><Sparkles size={17}/><b>Preencher com IA</b><small>Revise sempre antes de salvar.</small></div><textarea value={aiText} onChange={e => setAiText(e.target.value)} rows={2} placeholder="Ex.: Perfume de R$ 300 no Casa Bahia em 5x, para Iara"/><button type="button" className="button secondary" onClick={draftWithAi} disabled={aiLoading}>{aiLoading ? "Analisando…" : "Gerar sugestão"}</button>{aiError && <p className="form-error">{aiError}</p>}</div>
+    <form ref={formRef} action={action} className="transaction-form"><div className="form-grid"><label>Descrição<input name="description" placeholder="Ex.: Perfume para Iara" required autoFocus /></label><label>Tipo<select name="type" defaultValue="EXPENSE"><option value="EXPENSE">Despesa</option><option value="INCOME">Receita</option></select></label><label>Valor total (R$)<input name="amount" type="number" min="0.01" step="0.01" placeholder="0,00" required /></label><label>Parcelas<input name="installmentCount" type="number" min="1" max="360" defaultValue="1" required /></label><label>Competência inicial<input name="competenceDate" type="date" defaultValue={isoDate(new Date())} required /></label><label>Vencimento <span className="optional">opcional</span><input name="dueDate" type="date" /></label><label>Cartão<select name="cardId" defaultValue=""><option value="">Não se aplica</option>{cards.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label>Conta<select name="accountId" defaultValue=""><option value="">Não se aplica</option>{accounts.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}</select></label><label className="full">Categoria<select name="categoryId" defaultValue=""><option value="">Sem categoria</option>{categories.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}</select></label><label className="full">Observações<textarea name="notes" rows={2} placeholder="Para quem foi a compra, detalhes, acordo…" /></label></div>{state.error && <p className="form-error">{state.error}</p>}<footer><button type="button" className="button secondary" onClick={onClose}>Cancelar</button><button className="button primary" disabled={pending}>{pending ? "Criando…" : "Criar lançamento"}</button></footer></form></section></div>;
+}

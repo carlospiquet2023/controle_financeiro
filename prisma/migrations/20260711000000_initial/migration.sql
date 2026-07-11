@@ -1,0 +1,46 @@
+CREATE TYPE "Role" AS ENUM ('OWNER','ADMIN','EDITOR','VIEWER','GUEST');
+CREATE TYPE "AccountType" AS ENUM ('CASH','CHECKING','SAVINGS','DIGITAL_WALLET','PIX','FOOD_CARD','BUSINESS','OTHER');
+CREATE TYPE "TransactionType" AS ENUM ('EXPENSE','INCOME','TRANSFER');
+CREATE TYPE "TransactionStatus" AS ENUM ('PLANNED','PENDING','PAID','PARTIALLY_PAID','OVERDUE','CANCELED','DISPUTED','REFUNDED');
+CREATE TYPE "SplitStatus" AS ENUM ('OPEN','PARTIALLY_PAID','PAID','WAIVED');
+CREATE TYPE "AttachmentKind" AS ENUM ('RECEIPT','INVOICE','OTHER');
+
+CREATE TABLE "User" ("id" TEXT PRIMARY KEY,"name" TEXT NOT NULL,"email" TEXT NOT NULL,"passwordHash" TEXT NOT NULL,"twoFactorOn" BOOLEAN NOT NULL DEFAULT false,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE "Household" ("id" TEXT PRIMARY KEY,"name" TEXT NOT NULL,"currency" TEXT NOT NULL DEFAULT 'BRL',"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+CREATE TABLE "Membership" ("id" TEXT PRIMARY KEY,"userId" TEXT NOT NULL,"householdId" TEXT NOT NULL,"role" "Role" NOT NULL DEFAULT 'EDITOR');
+CREATE TABLE "Session" ("id" TEXT PRIMARY KEY,"userId" TEXT NOT NULL,"tokenHash" TEXT NOT NULL,"expiresAt" TIMESTAMP(3) NOT NULL);
+CREATE TABLE "Account" ("id" TEXT PRIMARY KEY,"householdId" TEXT NOT NULL,"name" TEXT NOT NULL,"institution" TEXT,"type" "AccountType" NOT NULL,"openingBalance" DECIMAL(14,2) NOT NULL DEFAULT 0,"color" TEXT NOT NULL DEFAULT '#5271FF',"active" BOOLEAN NOT NULL DEFAULT true);
+CREATE TABLE "Card" ("id" TEXT PRIMARY KEY,"householdId" TEXT NOT NULL,"paymentAccountId" TEXT,"name" TEXT NOT NULL,"institution" TEXT,"holder" TEXT,"lastFour" TEXT,"brand" TEXT,"creditLimit" DECIMAL(14,2) NOT NULL DEFAULT 0,"closingDay" INTEGER,"dueDay" INTEGER,"annualFee" DECIMAL(14,2) NOT NULL DEFAULT 0,"color" TEXT NOT NULL DEFAULT '#5271FF',"active" BOOLEAN NOT NULL DEFAULT true);
+CREATE TABLE "Category" ("id" TEXT PRIMARY KEY,"householdId" TEXT NOT NULL,"name" TEXT NOT NULL,"icon" TEXT NOT NULL DEFAULT 'CircleDollarSign',"color" TEXT NOT NULL DEFAULT '#5271FF');
+CREATE TABLE "Person" ("id" TEXT PRIMARY KEY,"householdId" TEXT NOT NULL,"name" TEXT NOT NULL,"email" TEXT,"phone" TEXT,"active" BOOLEAN NOT NULL DEFAULT true);
+CREATE TABLE "Transaction" ("id" TEXT PRIMARY KEY,"householdId" TEXT NOT NULL,"accountId" TEXT,"cardId" TEXT,"categoryId" TEXT,"responsiblePersonId" TEXT,"type" "TransactionType" NOT NULL,"status" "TransactionStatus" NOT NULL DEFAULT 'PENDING',"description" TEXT NOT NULL,"merchant" TEXT,"amount" DECIMAL(14,2) NOT NULL,"totalAmount" DECIMAL(14,2),"interestAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,"purchasedAt" TIMESTAMP(3),"competenceDate" TIMESTAMP(3) NOT NULL,"dueDate" TIMESTAMP(3),"paidAt" TIMESTAMP(3),"installmentNumber" INTEGER NOT NULL DEFAULT 1,"installmentCount" INTEGER NOT NULL DEFAULT 1,"recurring" BOOLEAN NOT NULL DEFAULT false,"notes" TEXT,"externalRef" TEXT,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,"updatedAt" TIMESTAMP(3) NOT NULL);
+CREATE TABLE "Split" ("id" TEXT PRIMARY KEY,"transactionId" TEXT NOT NULL,"personId" TEXT NOT NULL,"amount" DECIMAL(14,2) NOT NULL,"paidAmount" DECIMAL(14,2) NOT NULL DEFAULT 0,"dueDate" TIMESTAMP(3),"status" "SplitStatus" NOT NULL DEFAULT 'OPEN');
+CREATE TABLE "Attachment" ("id" TEXT PRIMARY KEY,"transactionId" TEXT NOT NULL,"key" TEXT NOT NULL,"fileName" TEXT NOT NULL,"contentType" TEXT NOT NULL,"kind" "AttachmentKind" NOT NULL DEFAULT 'RECEIPT');
+CREATE TABLE "AuditLog" ("id" TEXT PRIMARY KEY,"householdId" TEXT NOT NULL,"actorId" TEXT,"entity" TEXT NOT NULL,"entityId" TEXT NOT NULL,"action" TEXT NOT NULL,"before" JSONB,"after" JSONB,"createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP);
+
+CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+CREATE UNIQUE INDEX "Membership_userId_householdId_key" ON "Membership"("userId","householdId");
+CREATE UNIQUE INDEX "Session_tokenHash_key" ON "Session"("tokenHash"); CREATE INDEX "Session_userId_idx" ON "Session"("userId");
+CREATE INDEX "Account_householdId_idx" ON "Account"("householdId"); CREATE INDEX "Card_householdId_idx" ON "Card"("householdId");
+CREATE UNIQUE INDEX "Category_householdId_name_key" ON "Category"("householdId","name"); CREATE UNIQUE INDEX "Person_householdId_name_key" ON "Person"("householdId","name");
+CREATE INDEX "Transaction_householdId_competenceDate_idx" ON "Transaction"("householdId","competenceDate"); CREATE INDEX "Transaction_cardId_dueDate_idx" ON "Transaction"("cardId","dueDate");
+CREATE INDEX "Split_personId_status_idx" ON "Split"("personId","status"); CREATE UNIQUE INDEX "Attachment_key_key" ON "Attachment"("key"); CREATE INDEX "AuditLog_householdId_createdAt_idx" ON "AuditLog"("householdId","createdAt");
+
+ALTER TABLE "Membership" ADD CONSTRAINT "Membership_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE;
+ALTER TABLE "Membership" ADD CONSTRAINT "Membership_householdId_fkey" FOREIGN KEY ("householdId") REFERENCES "Household"("id") ON DELETE CASCADE;
+ALTER TABLE "Session" ADD CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE;
+ALTER TABLE "Account" ADD CONSTRAINT "Account_householdId_fkey" FOREIGN KEY ("householdId") REFERENCES "Household"("id") ON DELETE CASCADE;
+ALTER TABLE "Card" ADD CONSTRAINT "Card_householdId_fkey" FOREIGN KEY ("householdId") REFERENCES "Household"("id") ON DELETE CASCADE;
+ALTER TABLE "Card" ADD CONSTRAINT "Card_paymentAccountId_fkey" FOREIGN KEY ("paymentAccountId") REFERENCES "Account"("id") ON DELETE SET NULL;
+ALTER TABLE "Category" ADD CONSTRAINT "Category_householdId_fkey" FOREIGN KEY ("householdId") REFERENCES "Household"("id") ON DELETE CASCADE;
+ALTER TABLE "Person" ADD CONSTRAINT "Person_householdId_fkey" FOREIGN KEY ("householdId") REFERENCES "Household"("id") ON DELETE CASCADE;
+ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_householdId_fkey" FOREIGN KEY ("householdId") REFERENCES "Household"("id") ON DELETE CASCADE;
+ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_accountId_fkey" FOREIGN KEY ("accountId") REFERENCES "Account"("id") ON DELETE SET NULL;
+ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_cardId_fkey" FOREIGN KEY ("cardId") REFERENCES "Card"("id") ON DELETE SET NULL;
+ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_categoryId_fkey" FOREIGN KEY ("categoryId") REFERENCES "Category"("id") ON DELETE SET NULL;
+ALTER TABLE "Transaction" ADD CONSTRAINT "Transaction_responsiblePersonId_fkey" FOREIGN KEY ("responsiblePersonId") REFERENCES "Person"("id") ON DELETE SET NULL;
+ALTER TABLE "Split" ADD CONSTRAINT "Split_transactionId_fkey" FOREIGN KEY ("transactionId") REFERENCES "Transaction"("id") ON DELETE CASCADE;
+ALTER TABLE "Split" ADD CONSTRAINT "Split_personId_fkey" FOREIGN KEY ("personId") REFERENCES "Person"("id") ON DELETE RESTRICT;
+ALTER TABLE "Attachment" ADD CONSTRAINT "Attachment_transactionId_fkey" FOREIGN KEY ("transactionId") REFERENCES "Transaction"("id") ON DELETE CASCADE;
+ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_householdId_fkey" FOREIGN KEY ("householdId") REFERENCES "Household"("id") ON DELETE CASCADE;
+ALTER TABLE "AuditLog" ADD CONSTRAINT "AuditLog_actorId_fkey" FOREIGN KEY ("actorId") REFERENCES "User"("id") ON DELETE SET NULL;

@@ -1,0 +1,6 @@
+node_modules
+.next
+.git
+.env*
+Planilha-dividas julho.xlsx
+npm-debug.log

@@ -1,0 +1,10 @@
+node_modules
+.next
+*.tsbuildinfo
+.env
+.env.local
+dados_ia.md
+.railway
+*.log
+Planilha-dividas julho.xlsx
+coverage
