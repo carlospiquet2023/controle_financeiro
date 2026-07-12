@@ -151,6 +151,7 @@ export async function resetAllFinancialData(confirmation: string): Promise<Actio
   if (membership.role !== "OWNER") return { error: "Somente o proprietário pode resetar todos os dados financeiros." };
   const removed = await db.$transaction(async (tx) => {
     const transactionCount = await tx.transaction.count({ where: { householdId: membership.householdId } });
+    await tx.sharedLedgerLink.deleteMany({ where: { householdId: membership.householdId } });
     await tx.transaction.deleteMany({ where: { householdId: membership.householdId } });
     await tx.importBatch.deleteMany({ where: { householdId: membership.householdId } });
     await tx.card.deleteMany({ where: { householdId: membership.householdId } });

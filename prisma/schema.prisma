@@ -62,16 +62,17 @@ enum ImportStatus {
 }
 
 model User {
-  id           String         @id @default(cuid())
+  id           String             @id @default(cuid())
   name         String
-  email        String         @unique
+  email        String             @unique
   passwordHash String
-  twoFactorOn  Boolean        @default(false)
-  createdAt    DateTime       @default(now())
+  twoFactorOn  Boolean            @default(false)
+  createdAt    DateTime           @default(now())
   memberships  Membership[]
   sessions     Session[]
-  auditLogs    AuditLog[]     @relation("AuditActor")
+  auditLogs    AuditLog[]         @relation("AuditActor")
   aiDailyUsage AiDailyUsage[]
+  sharedLinks  SharedLedgerLink[] @relation("SharedLinksCreated")
 }
 
 model AiDailyUsage {
@@ -88,10 +89,10 @@ model AiDailyUsage {
 }
 
 model Household {
-  id            String        @id @default(cuid())
+  id            String             @id @default(cuid())
   name          String
-  currency      String        @default("BRL")
-  createdAt     DateTime      @default(now())
+  currency      String             @default("BRL")
+  createdAt     DateTime           @default(now())
   memberships   Membership[]
   accounts      Account[]
   cards         Card[]
@@ -100,6 +101,7 @@ model Household {
   transactions  Transaction[]
   importBatches ImportBatch[]
   auditLogs     AuditLog[]
+  sharedLinks   SharedLedgerLink[]
 }
 
 model Membership {
@@ -188,7 +190,7 @@ model Person {
 }
 
 model Transaction {
-  id                  String            @id @default(cuid())
+  id                  String                @id @default(cuid())
   householdId         String
   accountId           String?
   cardId              String?
@@ -196,35 +198,68 @@ model Transaction {
   responsiblePersonId String?
   importBatchId       String?
   type                TransactionType
-  status              TransactionStatus @default(PENDING)
+  status              TransactionStatus     @default(PENDING)
   description         String
   merchant            String?
-  amount              Decimal           @db.Decimal(14, 2)
-  totalAmount         Decimal?          @db.Decimal(14, 2)
-  interestAmount      Decimal           @default(0) @db.Decimal(14, 2)
+  amount              Decimal               @db.Decimal(14, 2)
+  totalAmount         Decimal?              @db.Decimal(14, 2)
+  interestAmount      Decimal               @default(0) @db.Decimal(14, 2)
   purchasedAt         DateTime?
   competenceDate      DateTime
   dueDate             DateTime?
   paidAt              DateTime?
-  installmentNumber   Int               @default(1)
-  installmentCount    Int               @default(1)
-  recurring           Boolean           @default(false)
+  installmentNumber   Int                   @default(1)
+  installmentCount    Int                   @default(1)
+  recurring           Boolean               @default(false)
   notes               String?
   externalRef         String?
-  createdAt           DateTime          @default(now())
-  updatedAt           DateTime          @updatedAt
-  household           Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  account             Account?          @relation(fields: [accountId], references: [id], onDelete: SetNull)
-  card                Card?             @relation(fields: [cardId], references: [id], onDelete: SetNull)
-  category            Category?         @relation(fields: [categoryId], references: [id], onDelete: SetNull)
-  responsiblePerson   Person?           @relation("ResponsiblePerson", fields: [responsiblePersonId], references: [id], onDelete: SetNull)
-  importBatch         ImportBatch?      @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
+  household           Household             @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  account             Account?              @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  card                Card?                 @relation(fields: [cardId], references: [id], onDelete: SetNull)
+  category            Category?             @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  responsiblePerson   Person?               @relation("ResponsiblePerson", fields: [responsiblePersonId], references: [id], onDelete: SetNull)
+  importBatch         ImportBatch?          @relation(fields: [importBatchId], references: [id], onDelete: SetNull)
   splits              Split[]
   attachments         Attachment[]
+  sharedComments      SharedLedgerComment[]
 
   @@index([householdId, competenceDate])
   @@index([cardId, dueDate])
   @@index([importBatchId])
+}
+
+model SharedLedgerLink {
+  id             String                @id @default(cuid())
+  householdId    String
+  createdById    String
+  month          DateTime              @db.Date
+  tokenHash      String                @unique
+  passwordHash   String
+  active         Boolean               @default(true)
+  failedAttempts Int                   @default(0)
+  lockedUntil    DateTime?
+  createdAt      DateTime              @default(now())
+  revokedAt      DateTime?
+  household      Household             @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  createdBy      User                  @relation("SharedLinksCreated", fields: [createdById], references: [id], onDelete: Cascade)
+  comments       SharedLedgerComment[]
+
+  @@index([householdId, month, active])
+}
+
+model SharedLedgerComment {
+  id            String           @id @default(cuid())
+  linkId        String
+  transactionId String
+  authorName    String
+  message       String
+  createdAt     DateTime         @default(now())
+  link          SharedLedgerLink @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  transaction   Transaction      @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+
+  @@index([linkId, transactionId, createdAt])
 }
 
 model ImportBatch {
