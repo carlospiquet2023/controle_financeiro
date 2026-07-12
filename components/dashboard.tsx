@@ -3,12 +3,13 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { AlertCircle, ArrowDownLeft, ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, ChevronRight, CircleDollarSign, CreditCard, FileSpreadsheet, LayoutDashboard, LogOut, Menu, Pencil, Plus, ReceiptText, RotateCcw, Save, Search, Settings, Sparkles, Trash2, TrendingDown, UploadCloud, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { AlertCircle, ArrowDownLeft, ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, ChevronRight, CircleDollarSign, CreditCard, FileSpreadsheet, LayoutDashboard, LogOut, Menu, MessageCircle, Pencil, Plus, ReceiptText, RotateCcw, Save, Search, Settings, Share2, Sparkles, Trash2, TrendingDown, UploadCloud, UserPlus, Users, WalletCards, X } from "lucide-react";
 import { assignTransactionCard, cancelTransaction, logout, markPaid, resetAllFinancialData, resetFinancialMonth, updateTransaction } from "@/app/actions";
 import { money, monthLabel } from "@/lib/format";
 import { ImportPanel } from "@/components/import-panel";
 import { ManagementModal } from "@/components/management-modal";
 import { TransactionForm } from "@/components/transaction-form";
+import { ShareLedgerModal } from "@/components/share-ledger-modal";
 const EconomicAdvisor = dynamic(() => import("@/components/economic-advisor").then((module) => module.EconomicAdvisor), { ssr: false });
 
 type View = "overview" | "transactions" | "invoices" | "accounts" | "people" | "planning" | "import" | "settings";
@@ -17,13 +18,13 @@ type Account = { id: string; name: string; openingBalance: number; color: string
 type Card = { id: string; name: string; color: string; creditLimit: number; institution?: string | null; holder?: string | null; lastFour?: string | null; closingDay?: number | null; dueDay?: number | null };
 type Category = { id: string; name: string; color: string };
 type Person = { id: string; name: string; email: string | null; phone: string | null };
-type Transaction = { id: string; description: string; amount: number; status: string; type: string; category: string; card: { id: string; name: string; color: string } | null; responsiblePerson: string | null; dueDate: string | null; competenceDate: string; installmentNumber: number; installmentCount: number; recurring: boolean; notes: string | null };
+type Transaction = { id: string; description: string; amount: number; status: string; type: string; category: string; card: { id: string; name: string; color: string } | null; responsiblePerson: string | null; dueDate: string | null; competenceDate: string; installmentNumber: number; installmentCount: number; recurring: boolean; notes: string | null; sharedComments: { id: string; authorName: string; message: string; createdAt: string }[] };
 type ForecastItem = { amount: number; competenceDate: string };
 type Receivable = { person: string; amount: number };
 type ImportHistory = { id: string; fileName: string; status: string; rowCount: number; importedCount: number; total: number; createdAt: string };
 type ExpenseSummary = { cardId: string | null; status: string; amount: number; count: number };
 
-type DashboardProps = { userName: string; householdName: string; selectedMonth: string; accounts: Account[]; cards: Card[]; categories: Category[]; people: Person[]; transactions: Transaction[]; overviewTransactions: Transaction[]; transactionTotal: number; transactionPage: number; transactionsPerPage: number; expenseSummary: ExpenseSummary[]; forecast: ForecastItem[]; receivables: Receivable[]; imports: ImportHistory[] };
+type DashboardProps = { userName: string; householdName: string; selectedMonth: string; accounts: Account[]; cards: Card[]; categories: Category[]; people: Person[]; transactions: Transaction[]; overviewTransactions: Transaction[]; transactionTotal: number; transactionPage: number; transactionsPerPage: number; expenseSummary: ExpenseSummary[]; forecast: ForecastItem[]; receivables: Receivable[]; imports: ImportHistory[]; sharedLinks: { id: string; createdAt: string }[] };
 
 const menuItems: { id: View; label: string; short: string; icon: React.ReactNode }[] = [
   { id: "overview", label: "Central financeira", short: "Início", icon: <LayoutDashboard /> },
@@ -36,12 +37,13 @@ const menuItems: { id: View; label: string; short: string; icon: React.ReactNode
 ];
 
 export function Dashboard(props: DashboardProps) {
-  const { userName, householdName, selectedMonth, accounts, cards, categories, people, transactions, overviewTransactions, transactionTotal, transactionPage, transactionsPerPage, expenseSummary, forecast, receivables, imports } = props;
+  const { userName, householdName, selectedMonth, accounts, cards, categories, people, transactions, overviewTransactions, transactionTotal, transactionPage, transactionsPerPage, expenseSummary, forecast, receivables, imports, sharedLinks } = props;
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [managing, setManaging] = useState<ManagementKind | null>(null);
   const [advisorOpen, setAdvisorOpen] = useState(false);
   const [mobileMenu, setMobileMenu] = useState(false);
+  const [sharing, setSharing] = useState(false);
   const [view, setView] = useState<View>("overview");
   const month = new Date(`${selectedMonth}T12:00:00`);
   useEffect(() => { const sync = () => { const hash = window.location.hash.replace("#", "") as View; setView([...menuItems.map(item => item.id), "settings"].includes(hash) ? hash : "overview"); }; sync(); window.addEventListener("hashchange", sync); window.addEventListener("popstate", sync); return () => { window.removeEventListener("hashchange", sync); window.removeEventListener("popstate", sync); }; }, []);
@@ -85,7 +87,7 @@ export function Dashboard(props: DashboardProps) {
         <div className="top-actions"><button className="advisor-trigger" onClick={() => { setMobileMenu(false); setAdvisorOpen(true); }}><span className="mini-orb"><i /><Sparkles size={15} /></span><div><b>Conselho Econômico</b><small>Analise antes de decidir</small></div></button><div className="user-badge"><span>{userName.charAt(0).toUpperCase()}</span><div><b>{userName}</b><small>Administrador da família</small></div></div><button className="button primary add-button" onClick={() => setAdding(true)}><Plus size={17} />Novo lançamento</button></div>
       </header>
 
-      {view === "overview" && <Overview month={month} total={invoiceTotal} paid={paid} pending={pending} receive={receive} transactions={overviewExpenses} groups={invoiceGroups} projections={projections.slice(0, 6)} onInvoices={() => navigate("invoices")} onTransactions={() => navigate("transactions")} onPlanning={() => navigate("planning")} onImport={() => navigate("import")} />}
+      {view === "overview" && <Overview month={month} total={invoiceTotal} paid={paid} pending={pending} receive={receive} transactions={overviewExpenses} groups={invoiceGroups} projections={projections.slice(0, 6)} onInvoices={() => navigate("invoices")} onTransactions={() => navigate("transactions")} onPlanning={() => navigate("planning")} onImport={() => navigate("import")} onShare={() => setSharing(true)} />}
       {view === "invoices" && <InvoicesView month={month} groups={invoiceGroups} total={invoiceTotal} transactions={expenses} cards={cards} />}
       {view === "transactions" && <TransactionsView transactions={active} total={transactionTotal} page={transactionPage} pageSize={transactionsPerPage} month={selectedMonth.slice(0, 7)} />}
       {view === "accounts" && <AccountsView accounts={accounts} onAdd={() => setManaging("account")} />}
@@ -97,6 +99,7 @@ export function Dashboard(props: DashboardProps) {
 
     {adding && <TransactionForm accounts={accounts} cards={cards} categories={categories} people={people} onClose={() => setAdding(false)} />}
     {managing && <ManagementModal kind={managing} onClose={() => setManaging(null)} />}
+    {sharing && <ShareLedgerModal month={selectedMonth.slice(0, 7)} links={sharedLinks} onClose={() => setSharing(false)} />}
     <button className={`mobile-menu-backdrop ${mobileMenu ? "open" : ""}`} aria-label="Fechar menu" tabIndex={mobileMenu ? 0 : -1} onClick={() => setMobileMenu(false)} />
     <aside className={`mobile-drawer ${mobileMenu ? "open" : ""}`} aria-hidden={!mobileMenu}><div className="mobile-drawer-head"><div className="brand"><span className="mark">F</span><div><b>finora</b><small>{householdName}</small></div></div><button aria-label="Fechar menu" onClick={() => setMobileMenu(false)}><X size={18} /></button></div><nav>{menuItems.map((item) => <button className={view === item.id ? "active" : ""} key={item.id} onClick={() => navigate(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav><div className="mobile-drawer-bottom"><button onClick={() => navigate("settings")}><Settings /><span>Configurações</span></button><form action={logout}><button type="submit"><LogOut /><span>Sair</span></button></form></div></aside>
     <EconomicAdvisor open={advisorOpen} month={selectedMonth} onClose={() => setAdvisorOpen(false)} />
@@ -108,7 +111,7 @@ function MonthControl({ month, previous, next }: { month: Date; previous: () => 
 }
 
 type InvoiceGroup = Card & { total: number; paid: number; count: number; review: boolean };
-function Overview({ month, total, paid, pending, receive, transactions, groups, projections, onInvoices, onTransactions, onPlanning, onImport }: { month: Date; total: number; paid: number; pending: number; receive: number; transactions: Transaction[]; groups: InvoiceGroup[]; projections: { date: Date; total: number }[]; onInvoices: () => void; onTransactions: () => void; onPlanning: () => void; onImport: () => void }) {
+function Overview({ month, total, paid, pending, receive, transactions, groups, projections, onInvoices, onTransactions, onPlanning, onImport, onShare }: { month: Date; total: number; paid: number; pending: number; receive: number; transactions: Transaction[]; groups: InvoiceGroup[]; projections: { date: Date; total: number }[]; onInvoices: () => void; onTransactions: () => void; onPlanning: () => void; onImport: () => void; onShare: () => void }) {
   const unknown = groups.find((group) => group.review);
   const progress = total ? Math.min((paid / total) * 100, 100) : 0;
   return <>
@@ -119,7 +122,7 @@ function Overview({ month, total, paid, pending, receive, transactions, groups, 
     </section>
     <section className="summary-grid compact-stats"><Stat label="Ainda falta pagar" value={money(pending)} detail={total ? `${Math.round(100 - progress)}% do mês` : "Mês sem despesas"} icon={<TrendingDown />} tone="coral" /><Stat label="Já foi pago" value={money(paid)} detail={total ? `${Math.round(progress)}% concluído` : "Nenhum pagamento"} icon={<Check />} tone="mint" /><Stat label="A receber de pessoas" value={money(receive)} detail="Acertos familiares em aberto" icon={<ArrowDownLeft />} tone="gold" /><Stat label="Próximo mês" value={money(projections[1]?.total || 0)} detail="Parcelas e fixos previstos" icon={<CalendarDays />} tone="blue" /></section>
     <section className="overview-grid"><div className="panel"><PanelHeading eyebrow="FATURAS" title="Quanto pagar em cada cartão" action="Ver detalhes" onAction={onInvoices} /><div className="invoice-quick-list">{groups.slice(0, 6).map((group) => <div key={group.id}><i style={{ background: group.color }} /><span><b>{group.name}</b><small>{group.count ? `${group.count} lançamento${group.count === 1 ? "" : "s"}` : "Sem compras neste mês"}</small></span><strong>{money(group.total)}</strong></div>)}</div></div><div className="panel"><PanelHeading eyebrow="PREVISÃO" title="Pressão dos próximos meses" action="Ver 12 meses" onAction={onPlanning} /><ForecastChart projections={projections} /><p className="chart-note">Soma prevista em 6 meses: <b>{money(projections.reduce((sum, item) => sum + item.total, 0))}</b></p></div></section>
-    <section className="panel"><PanelHeading eyebrow="COMPROMISSOS" title="Lançamentos deste mês" action="Ver todos" onAction={onTransactions} /><TransactionList transactions={transactions.slice(0, 8)} empty="Nenhum compromisso neste mês." /></section>
+    <section className="panel"><div className="commitments-heading"><PanelHeading eyebrow="COMPROMISSOS" title="Lançamentos deste mês" action="Ver todos" onAction={onTransactions} /><button onClick={onShare}><Share2 />Compartilhar</button></div><TransactionList transactions={transactions.slice(0, 8)} empty="Nenhum compromisso neste mês." /></section>
   </>;
 }
 
@@ -204,7 +207,7 @@ function TransactionList({ transactions, empty }: { transactions: Transaction[];
     <label className="transaction-edit-amount"><span>Valor (R$)</span><input type="number" min="0.01" step="0.01" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: event.target.value }))} /></label>
     <span className={`status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span>
     <div className="row-actions"><button className="pay-button" type="submit" disabled={saving}><Save size={13} />{saving ? "Salvando" : "Salvar"}</button><button className="cancel-button" type="button" title="Cancelar edição" onClick={() => setEditing(null)}><X size={14} /></button></div>
-  </form> : <div className={`transaction-row ${item.status === "CANCELED" ? "canceled" : ""}`} key={item.id}><span className="transaction-icon" style={{ background: item.card?.color || "#E2E8F0", color: item.card ? "#fff" : "#475569" }}>{item.card ? <CreditCard size={17} /> : <CircleDollarSign size={17} />}</span><div className="transaction-title"><b>{item.description}</b><small>{item.card?.name || "Sem cartão"} · {item.category}{item.responsiblePerson ? ` · ${item.responsiblePerson}` : ""}</small></div><button className="installment editable-value" title="Editar parcelas" onClick={() => begin(item)}>{item.recurring ? "Fixo" : item.installmentCount > 1 ? `${String(item.installmentNumber).padStart(2, "0")} de ${String(item.installmentCount).padStart(2, "0")}` : "À vista"}</button><button className="due editable-value" title="Editar data" onClick={() => begin(item)}>{item.dueDate ? `Vence ${ledgerDate.format(new Date(item.dueDate))}` : ledgerDate.format(new Date(item.competenceDate))}</button><button className="transaction-amount editable-value" title="Editar valor" onClick={() => begin(item)}>{money(item.amount)}</button><span className={`status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span><div className="row-actions"><button className="edit-button" title="Editar parcelas, data e valor" onClick={() => begin(item)}><Pencil size={13} /></button>{!["PAID", "CANCELED"].includes(item.status) && <button className="pay-button" onClick={() => markPaid(item.id)}><Check size={13} />Pago</button>}{item.status !== "CANCELED" && <button className="cancel-button" title="Cancelar lançamento" onClick={() => cancelTransaction(item.id)}><X size={14} /></button>}</div></div>)}</div></>;
+  </form> : <div className={`transaction-row ${item.status === "CANCELED" ? "canceled" : ""}`} key={item.id}><span className="transaction-icon" style={{ background: item.card?.color || "#E2E8F0", color: item.card ? "#fff" : "#475569" }}>{item.card ? <CreditCard size={17} /> : <CircleDollarSign size={17} />}</span><div className="transaction-title"><b>{item.description}</b><small>{item.card?.name || "Sem cartão"} · {item.category}{item.responsiblePerson ? ` · ${item.responsiblePerson}` : ""}</small>{item.sharedComments[0] && <small className="shared-comment-preview"><MessageCircle /> <b>{item.sharedComments[0].authorName}:</b> {item.sharedComments[0].message}</small>}</div><button className="installment editable-value" title="Editar parcelas" onClick={() => begin(item)}>{item.recurring ? "Fixo" : item.installmentCount > 1 ? `${String(item.installmentNumber).padStart(2, "0")} de ${String(item.installmentCount).padStart(2, "0")}` : "À vista"}</button><button className="due editable-value" title="Editar data" onClick={() => begin(item)}>{item.dueDate ? `Vence ${ledgerDate.format(new Date(item.dueDate))}` : ledgerDate.format(new Date(item.competenceDate))}</button><button className="transaction-amount editable-value" title="Editar valor" onClick={() => begin(item)}>{money(item.amount)}</button><span className={`status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span><div className="row-actions"><button className="edit-button" title="Editar parcelas, data e valor" onClick={() => begin(item)}><Pencil size={13} /></button>{!["PAID", "CANCELED"].includes(item.status) && <button className="pay-button" onClick={() => markPaid(item.id)}><Check size={13} />Pago</button>}{item.status !== "CANCELED" && <button className="cancel-button" title="Cancelar lançamento" onClick={() => cancelTransaction(item.id)}><X size={14} /></button>}</div></div>)}</div></>;
 }
 
 const ledgerDate = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" });
