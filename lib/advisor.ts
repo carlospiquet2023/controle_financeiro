@@ -40,6 +40,25 @@ const responseSchema = {
   }, required: ["headline", "summary", "riskLevel", "insights", "nextActions", "basis", "caveat"],
 } as const;
 
+function fallbackEconomicAdvice(snapshot: AdvisorSnapshot): AdvisorAdvice {
+  const futureTotal = snapshot.futureExpenseCommitments.slice(1).reduce((sum, item) => sum + item.amount, 0);
+  const nextActions: string[] = [];
+  if (snapshot.currentMonthPendingExpenses > 0) nextActions.push("Conferir os compromissos pendentes e definir a ordem de pagamento por vencimento e urgência.");
+  if (snapshot.currentMonthIncome <= 0) nextActions.push("Cadastrar a renda do mês, quando existir, para calcular capacidade de pagamento com segurança.");
+  if (futureTotal > 0) nextActions.push("Revisar as parcelas dos próximos meses como despesas já assumidas, não como dinheiro disponível.");
+  if (snapshot.currentMonthUnassignedExpenses > 0) nextActions.push("Associar os lançamentos sem cartão ou conta para melhorar a leitura dos totais.");
+  if (!nextActions.length) nextActions.push("Manter os lançamentos atualizados antes de simular uma nova decisão financeira.");
+  return {
+    headline: "Análise calculada pelo Finora",
+    summary: "O Conselho Econômico manteve a leitura com os cálculos locais do Finora.",
+    riskLevel: snapshot.health,
+    insights: [{ title: "Cálculos preservados", explanation: "A leitura principal vem dos dados calculados pelo Finora.", amount: null }],
+    nextActions: nextActions.slice(0, 4),
+    basis: ["Dados calculados pelo Finora."],
+    caveat: "A análise considera apenas os lançamentos cadastrados no Finora.",
+  };
+}
+
 export async function createEconomicAdvice(message: string, snapshot: AdvisorSnapshot) {
   if (!process.env.GROQ_API_KEY) throw new Error("O Conselho Econômico ainda não está configurado.");
   const client = new Groq({ apiKey: process.env.GROQ_API_KEY });
@@ -71,14 +90,18 @@ SEMÂNTICA DOS DADOS:
 
 PEDIDO DO USUÁRIO:
 ${message}`;
-  const response = await client.chat.completions.create({
-    model: process.env.GROQ_MODEL || "openai/gpt-oss-120b", reasoning_effort: "medium", temperature: 0.15, max_completion_tokens: 1400,
-    messages: [{ role: "system", content: "Responda exclusivamente no JSON Schema. Os cálculos fornecidos são a única fonte numérica permitida." }, { role: "user", content: prompt }],
-    response_format: { type: "json_schema", json_schema: { name: "economic_advice", strict: true, schema: responseSchema } },
-  });
-  const content = response.choices[0]?.message.content;
-  if (!content) throw new Error("O Conselho Econômico não retornou uma análise utilizável.");
-  return adviceSchema.parse(JSON.parse(content));
+  try {
+    const response = await client.chat.completions.create({
+      model: process.env.GROQ_MODEL || "openai/gpt-oss-120b", reasoning_effort: "medium", temperature: 0.15, max_completion_tokens: 1400,
+      messages: [{ role: "system", content: "Responda exclusivamente no JSON Schema. Os cálculos fornecidos são a única fonte numérica permitida." }, { role: "user", content: prompt }],
+      response_format: { type: "json_schema", json_schema: { name: "economic_advice", strict: true, schema: responseSchema } },
+    });
+    const content = response.choices[0]?.message.content;
+    if (!content) throw new Error("O Conselho Econômico não retornou uma análise utilizável.");
+    return adviceSchema.parse(JSON.parse(content));
+  } catch {
+    return fallbackEconomicAdvice(snapshot);
+  }
 }
 
 export function calculateHealth(income: number, expenses: number): Pick<AdvisorSnapshot, "health" | "commitmentRate"> {
