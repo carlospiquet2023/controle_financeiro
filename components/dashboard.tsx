@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { AlertCircle, ArrowDownLeft, ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, ChevronRight, CircleDollarSign, CreditCard, FileSpreadsheet, LayoutDashboard, LogOut, Menu, Pencil, Plus, ReceiptText, Save, Search, Settings, Sparkles, TrendingDown, UploadCloud, UserPlus, Users, WalletCards, X } from "lucide-react";
-import { assignTransactionCard, cancelTransaction, logout, markPaid, updateTransaction } from "@/app/actions";
+import { AlertCircle, ArrowDownLeft, ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, ChevronRight, CircleDollarSign, CreditCard, FileSpreadsheet, LayoutDashboard, LogOut, Menu, Pencil, Plus, ReceiptText, RotateCcw, Save, Search, Settings, Sparkles, Trash2, TrendingDown, UploadCloud, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { assignTransactionCard, cancelTransaction, logout, markPaid, resetAllFinancialData, resetFinancialMonth, updateTransaction } from "@/app/actions";
 import { money, monthLabel } from "@/lib/format";
 import { ImportPanel } from "@/components/import-panel";
 import { ManagementModal } from "@/components/management-modal";
@@ -92,7 +92,7 @@ export function Dashboard(props: DashboardProps) {
       {view === "people" && <PeopleView people={people} receivables={receivables} onAdd={() => setManaging("person")} />}
       {view === "planning" && <PlanningView projections={projections} />}
       {view === "import" && <ImportPanel history={imports} onImported={() => navigate("transactions")} />}
-      {view === "settings" && <SettingsView categories={categories} onCategory={() => setManaging("category")} onCard={() => setManaging("card")} onAccount={() => setManaging("account")} onPerson={() => setManaging("person")} />}
+      {view === "settings" && <SettingsView categories={categories} month={selectedMonth.slice(0, 7)} onCategory={() => setManaging("category")} onCard={() => setManaging("card")} onAccount={() => setManaging("account")} onPerson={() => setManaging("person")} />}
     </section>
 
     {adding && <TransactionForm accounts={accounts} cards={cards} categories={categories} people={people} onClose={() => setAdding(false)} />}
@@ -149,7 +149,31 @@ function PeopleView({ people, receivables, onAdd }: { people: Person[]; receivab
 
 function PlanningView({ projections }: { projections: { date: Date; total: number }[] }) { const total = projections.reduce((sum, item) => sum + item.total, 0); const average = total / projections.length; return <><section className="planning-head"><div><span className="kicker light">VISÃO DE 12 MESES</span><h2>{money(total)}</h2><p>já comprometidos em parcelas e despesas recorrentes</p></div><div><small>Média mensal prevista</small><strong>{money(average)}</strong></div></section><section className="panel planning-panel"><PanelHeading eyebrow="CALENDÁRIO FINANCEIRO" title="Pressão mensal dos compromissos" /><ForecastChart projections={projections} large /><div className="month-ledger">{projections.map((item) => <div key={item.date.toISOString()}><span>{item.date.toLocaleDateString("pt-BR", { month: "long", year: "numeric" })}</span><strong>{money(item.total)}</strong><i style={{ width: `${Math.max((item.total / Math.max(...projections.map((entry) => entry.total), 1)) * 100, item.total ? 2 : 0)}%` }} /></div>)}</div></section></>; }
 
-function SettingsView({ categories, onCategory, onCard, onAccount, onPerson }: { categories: Category[]; onCategory: () => void; onCard: () => void; onAccount: () => void; onPerson: () => void }) { return <section className="settings-grid"><div className="panel"><PanelHeading eyebrow="ORGANIZAÇÃO" title="Categorias" action="Nova categoria" onAction={onCategory} /><div className="category-list">{categories.map((item) => <span key={item.id}><i style={{ background: item.color }} />{item.name}</span>)}</div></div><div className="panel"><PanelHeading eyebrow="CADASTROS" title="Estrutura da família" /><div className="settings-actions"><button onClick={onCard}><CreditCard /><span><b>Novo cartão</b><small>Nome, cor, vencimento e limite</small></span><ChevronRight /></button><button onClick={onAccount}><WalletCards /><span><b>Nova conta</b><small>Conta usada nos pagamentos</small></span><ChevronRight /></button><button onClick={onPerson}><UserPlus /><span><b>Nova pessoa</b><small>Responsáveis e valores a devolver</small></span><ChevronRight /></button></div></div><div className="panel system-panel"><PanelHeading eyebrow="INFRAESTRUTURA" title="Proteções ativas" /><div className="system-list"><span><Check />PostgreSQL Railway <b>Ativo</b></span><span><Check />Originais no Cloudflare R2 <b>Ativo</b></span><span><Check />Assistente Groq com confirmação <b>Ativo</b></span><span><Check />Trilha de auditoria e isolamento familiar <b>Ativo</b></span></div></div><div className="panel ownership-panel"><div className="ownership-mark"><BadgeCheck /></div><div><span className="kicker">AUTORIA E TITULARIDADE</span><h2>Uma criação de Carlao Antonio de Oliveira Piquet</h2><p>Criador, titular e desenvolvedor principal do Finora.</p><a href="mailto:carlos.piquet2016@gmail.com">carlos.piquet2016@gmail.com</a></div><small>© 2026 · Software proprietário · Todos os direitos reservados</small></div></section>; }
+function SettingsView({ categories, month, onCategory, onCard, onAccount, onPerson }: { categories: Category[]; month: string; onCategory: () => void; onCard: () => void; onAccount: () => void; onPerson: () => void }) { return <section className="settings-grid"><div className="panel"><PanelHeading eyebrow="ORGANIZAÇÃO" title="Categorias" action="Nova categoria" onAction={onCategory} /><div className="category-list">{categories.map((item) => <span key={item.id}><i style={{ background: item.color }} />{item.name}</span>)}</div></div><div className="panel"><PanelHeading eyebrow="CADASTROS" title="Estrutura da família" /><div className="settings-actions"><button onClick={onCard}><CreditCard /><span><b>Novo cartão</b><small>Nome, cor, vencimento e limite</small></span><ChevronRight /></button><button onClick={onAccount}><WalletCards /><span><b>Nova conta</b><small>Conta usada nos pagamentos</small></span><ChevronRight /></button><button onClick={onPerson}><UserPlus /><span><b>Nova pessoa</b><small>Responsáveis e valores a devolver</small></span><ChevronRight /></button></div></div><div className="panel system-panel"><PanelHeading eyebrow="INFRAESTRUTURA" title="Proteções ativas" /><div className="system-list"><span><Check />PostgreSQL Railway <b>Ativo</b></span><span><Check />Originais no Cloudflare R2 <b>Ativo</b></span><span><Check />Assistente Groq com confirmação <b>Ativo</b></span><span><Check />Trilha de auditoria e isolamento familiar <b>Ativo</b></span></div></div><ResetPanel month={month} /><div className="panel ownership-panel"><div className="ownership-mark"><BadgeCheck /></div><div><span className="kicker">AUTORIA E TITULARIDADE</span><h2>Uma criação de Carlao Antonio de Oliveira Piquet</h2><p>Criador, titular e desenvolvedor principal do Finora.</p><a href="mailto:carlos.piquet2016@gmail.com">carlos.piquet2016@gmail.com</a></div><small>© 2026 · Software proprietário · Todos os direitos reservados</small></div></section>; }
+
+function ResetPanel({ month }: { month: string }) {
+  const router = useRouter();
+  const [confirming, setConfirming] = useState<"month" | "all" | null>(null);
+  const [confirmation, setConfirmation] = useState("");
+  const [message, setMessage] = useState("");
+  const [pending, startReset] = useTransition();
+  const monthName = new Date(`${month}-01T12:00:00`).toLocaleDateString("pt-BR", { month: "long", year: "numeric" });
+  function runMonthReset() {
+    startReset(async () => {
+      const result = await resetFinancialMonth(month);
+      if (result.error) return setMessage(result.error);
+      setConfirming(null); setMessage(`${result.removed || 0} lançamentos de ${monthName} foram removidos.`); router.push(`/?month=${month}#settings`); router.refresh();
+    });
+  }
+  function runAllReset() {
+    startReset(async () => {
+      const result = await resetAllFinancialData(confirmation);
+      if (result.error) return setMessage(result.error);
+      setConfirming(null); setConfirmation(""); setMessage("Todos os dados financeiros foram removidos."); router.push("/#settings"); router.refresh();
+    });
+  }
+  return <div className="panel reset-panel"><PanelHeading eyebrow="ZONA DE REDEFINIÇÃO" title="Resetar dados financeiros" /><p className="reset-intro">Use estas opções somente quando quiser começar novamente. Seu usuário, senha e família serão preservados.</p><div className="reset-options"><article><span><RotateCcw /></span><div><b>Resetar {monthName}</b><p>Remove apenas os lançamentos do mês selecionado. Outros meses e cadastros permanecem.</p></div><button onClick={() => { setMessage(""); setConfirming("month"); }}>Resetar mês</button></article><article className="critical"><span><Trash2 /></span><div><b>Resetar tudo</b><p>Remove lançamentos, importações, cartões, contas, categorias e pessoas da família.</p></div><button onClick={() => { setMessage(""); setConfirmation(""); setConfirming("all"); }}>Resetar tudo</button></article></div>{confirming && <div className="reset-confirmation" role="alertdialog" aria-modal="true" aria-label="Confirmar redefinição"><div><b>{confirming === "month" ? `Resetar ${monthName}?` : "Resetar todos os dados financeiros?"}</b><p>{confirming === "month" ? "Esta ação não pode ser desfeita e afetará somente o mês selecionado." : "Esta ação não pode ser desfeita. Digite RESETAR TUDO para confirmar."}</p>{confirming === "all" && <input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} placeholder="RESETAR TUDO" autoFocus />}</div><footer><button className="button secondary" disabled={pending} onClick={() => { setConfirming(null); setConfirmation(""); }}>Cancelar</button><button className="button danger-button" disabled={pending || (confirming === "all" && confirmation !== "RESETAR TUDO")} onClick={confirming === "month" ? runMonthReset : runAllReset}>{pending ? "Resetando…" : "Confirmar reset"}</button></footer></div>}{message && <div className={`notice ${message.includes("removidos") || message.includes("removidas") ? "" : "danger"}`}>{message}</div>}</div>;
+}
 
 function TransactionList({ transactions, empty }: { transactions: Transaction[]; empty: string }) {
   const router = useRouter();

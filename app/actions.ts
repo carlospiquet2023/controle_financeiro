@@ -8,12 +8,13 @@ import { z } from "zod";
 import { clearSession, createSession, requireMembership } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { installmentSchedule } from "@/lib/finance";
+import { addUtcMonths, monthStartUtc } from "@/lib/format";
 
 const credentials = z.object({ name: z.string().trim().min(2).max(80).optional(), email: z.string().trim().email(), password: z.string().min(10).max(128) });
 type AuthState = { error?: string };
 type TransactionState = { error?: string; success?: boolean };
 type ImportState = { error?: string; imported?: number; skipped?: number; batchId?: string };
-export type ActionState = { error?: string; success?: boolean };
+export type ActionState = { error?: string; success?: boolean; removed?: number };
 
 export async function authenticate(_: AuthState, formData: FormData): Promise<AuthState> {
   const result = credentials.safeParse(Object.fromEntries(formData));
@@ -124,6 +125,44 @@ export async function updateTransaction(transactionId: string, input: unknown): 
   ]);
   revalidatePath("/");
   return { success: true };
+}
+
+const monthResetSchema = z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/);
+
+export async function resetFinancialMonth(monthKey: string): Promise<ActionState> {
+  const parsed = monthResetSchema.safeParse(monthKey);
+  if (!parsed.success) return { error: "Mês inválido para redefinição." };
+  const { user, membership } = await requireMembership();
+  if (!["OWNER", "ADMIN"].includes(membership.role)) return { error: "Somente proprietários e administradores podem resetar um mês." };
+  const month = monthStartUtc(parsed.data);
+  const nextMonth = addUtcMonths(month, 1);
+  const removed = await db.$transaction(async (tx) => {
+    const result = await tx.transaction.deleteMany({ where: { householdId: membership.householdId, competenceDate: { gte: month, lt: nextMonth } } });
+    await tx.auditLog.create({ data: { householdId: membership.householdId, actorId: user.id, entity: "Household", entityId: membership.householdId, action: "RESET_MONTH", before: { month: parsed.data, transactionCount: result.count }, after: { transactionCount: 0 } } });
+    return result.count;
+  });
+  revalidatePath("/");
+  return { success: true, removed };
+}
+
+export async function resetAllFinancialData(confirmation: string): Promise<ActionState> {
+  if (confirmation !== "RESETAR TUDO") return { error: "Digite RESETAR TUDO para confirmar." };
+  const { user, membership } = await requireMembership();
+  if (membership.role !== "OWNER") return { error: "Somente o proprietário pode resetar todos os dados financeiros." };
+  const removed = await db.$transaction(async (tx) => {
+    const transactionCount = await tx.transaction.count({ where: { householdId: membership.householdId } });
+    await tx.transaction.deleteMany({ where: { householdId: membership.householdId } });
+    await tx.importBatch.deleteMany({ where: { householdId: membership.householdId } });
+    await tx.card.deleteMany({ where: { householdId: membership.householdId } });
+    await tx.account.deleteMany({ where: { householdId: membership.householdId } });
+    await tx.category.deleteMany({ where: { householdId: membership.householdId } });
+    await tx.person.deleteMany({ where: { householdId: membership.householdId } });
+    await tx.auditLog.deleteMany({ where: { householdId: membership.householdId } });
+    await tx.auditLog.create({ data: { householdId: membership.householdId, actorId: user.id, entity: "Household", entityId: membership.householdId, action: "RESET_ALL_FINANCIAL_DATA", before: { transactionCount }, after: { transactionCount: 0 } } });
+    return transactionCount;
+  });
+  revalidatePath("/");
+  return { success: true, removed };
 }
 
 export async function assignTransactionCard(transactionId: string, cardId: string): Promise<ActionState> {
