@@ -13,6 +13,7 @@ const allowed = new Set([
 export async function POST(request: Request) {
   try {
     const { membership } = await requireMembership();
+    if (["VIEWER", "GUEST"].includes(membership.role)) throw new Error("Seu perfil não tem permissão para enviar planilhas.");
     const form = await request.formData();
     const file = form.get("file");
     if (!(file instanceof File)) throw new Error("Selecione uma planilha para importar.");

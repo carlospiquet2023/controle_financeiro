@@ -17,6 +17,7 @@ export type AdvisorSnapshot = {
   openFamilyReimbursements: number;
   health: "GREEN" | "YELLOW" | "ORANGE" | "RED" | "INCOMPLETE";
   commitmentRate: number | null;
+  economicContext?: { code: string; name: string; unit: string; date: string; value: number; source: string }[];
 };
 
 const adviceSchema = z.object({

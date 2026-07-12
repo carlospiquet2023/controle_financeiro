@@ -3,9 +3,10 @@ import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/db";
+import { authSecret } from "@/lib/security";
 
 const COOKIE = "finora_session";
-const key = () => new TextEncoder().encode(process.env.AUTH_SECRET || "development-only-change-me-please-32chars");
+const key = () => new TextEncoder().encode(authSecret());
 const hash = (value: string) => createHash("sha256").update(value).digest("hex");
 
 export async function createSession(userId: string) {
@@ -16,7 +17,19 @@ export async function createSession(userId: string) {
   (await cookies()).set(COOKIE, token, { httpOnly: true, secure: process.env.NODE_ENV === "production", sameSite: "lax", expires: expiresAt, path: "/" });
 }
 
-export async function clearSession() { (await cookies()).delete(COOKIE); }
+export async function clearSession() {
+  const store = await cookies();
+  const token = store.get(COOKIE)?.value;
+  if (token) {
+    try {
+      const { payload } = await jwtVerify(token, key());
+      if (typeof payload.sid === "string") await db.session.deleteMany({ where: { tokenHash: hash(payload.sid) } });
+    } catch {
+      // O cookie ainda deve ser removido quando estiver inválido ou expirado.
+    }
+  }
+  store.delete(COOKIE);
+}
 
 export async function currentUser() {
   const token = (await cookies()).get(COOKIE)?.value;

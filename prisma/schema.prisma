@@ -61,6 +61,80 @@ enum ImportStatus {
   ROLLED_BACK
 }
 
+enum DebtStatus {
+  ACTIVE
+  NEGOTIATING
+  PAID
+  DEFAULTED
+}
+
+enum AttachmentUploadStatus {
+  UPLOADING
+  READY
+  FAILED
+}
+
+enum OcrStatus {
+  NOT_REQUESTED
+  PENDING
+  PROCESSING
+  COMPLETED
+  NEEDS_REVIEW
+  FAILED
+}
+
+enum FinancialConnectionStatus {
+  PENDING
+  SYNCING
+  ACTIVE
+  REAUTH_REQUIRED
+  REVOKED
+  ERROR
+}
+
+enum SyncJobStatus {
+  PENDING
+  RUNNING
+  SUCCEEDED
+  FAILED
+}
+
+enum TransactionMatchStatus {
+  SUGGESTED
+  CONFIRMED
+  REJECTED
+  IMPORTED
+}
+
+enum TaxProfileType {
+  FAMILY
+  BUSINESS
+}
+
+enum TaxRegime {
+  NOT_APPLICABLE
+  MEI
+  SIMPLES_NACIONAL
+  REGULAR
+  LUCRO_PRESUMIDO
+  LUCRO_REAL
+}
+
+enum TaxDocumentStatus {
+  IMPORTED
+  VALIDATED
+  NEEDS_REVIEW
+  REJECTED
+}
+
+enum TaxLedgerEntryKind {
+  DEBIT
+  CREDIT
+  PRESUMED_CREDIT
+  ADJUSTMENT
+  SETTLEMENT
+}
+
 model User {
   id           String             @id @default(cuid())
   name         String
@@ -73,6 +147,15 @@ model User {
   auditLogs    AuditLog[]         @relation("AuditActor")
   aiDailyUsage AiDailyUsage[]
   sharedLinks  SharedLedgerLink[] @relation("SharedLinksCreated")
+}
+
+model LoginThrottle {
+  id              String    @id
+  emailHash       String    @unique
+  failedAttempts  Int       @default(0)
+  windowStartedAt DateTime  @default(now())
+  lockedUntil     DateTime?
+  updatedAt       DateTime  @updatedAt
 }
 
 model AiDailyUsage {
@@ -89,19 +172,31 @@ model AiDailyUsage {
 }
 
 model Household {
-  id            String             @id @default(cuid())
-  name          String
-  currency      String             @default("BRL")
-  createdAt     DateTime           @default(now())
-  memberships   Membership[]
-  accounts      Account[]
-  cards         Card[]
-  categories    Category[]
-  people        Person[]
-  transactions  Transaction[]
-  importBatches ImportBatch[]
-  auditLogs     AuditLog[]
-  sharedLinks   SharedLedgerLink[]
+  id                   String                @id @default(cuid())
+  name                 String
+  currency             String                @default("BRL")
+  createdAt            DateTime              @default(now())
+  memberships          Membership[]
+  accounts             Account[]
+  cards                Card[]
+  categories           Category[]
+  people               Person[]
+  transactions         Transaction[]
+  importBatches        ImportBatch[]
+  auditLogs            AuditLog[]
+  sharedLinks          SharedLedgerLink[]
+  monthlyBudgets       MonthlyBudget[]
+  monthCloses          FinancialMonthClose[]
+  debts                Debt[]
+  transfers            AccountTransfer[]
+  financialConnections FinancialConnection[]
+  webhookEvents        WebhookEvent[]
+  transactionMatches   TransactionMatch[]
+  taxProfiles          TaxProfile[]
+  taxDocuments         TaxDocument[]
+  taxSimulations       TaxSimulation[]
+  taxLedgerEntries     TaxLedgerEntry[]
+  taxCashbacks         TaxCashback[]
 }
 
 model Membership {
@@ -126,17 +221,19 @@ model Session {
 }
 
 model Account {
-  id             String        @id @default(cuid())
-  householdId    String
-  name           String
-  institution    String?
-  type           AccountType
-  openingBalance Decimal       @default(0) @db.Decimal(14, 2)
-  color          String        @default("#5271FF")
-  active         Boolean       @default(true)
-  household      Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  cardsPaid      Card[]        @relation("PaymentAccount")
-  transactions   Transaction[]
+  id                String            @id @default(cuid())
+  householdId       String
+  name              String
+  institution       String?
+  type              AccountType
+  openingBalance    Decimal           @default(0) @db.Decimal(14, 2)
+  color             String            @default("#5271FF")
+  active            Boolean           @default(true)
+  household         Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  cardsPaid         Card[]            @relation("PaymentAccount")
+  transactions      Transaction[]
+  outgoingTransfers AccountTransfer[] @relation("OutgoingTransfer")
+  incomingTransfers AccountTransfer[] @relation("IncomingTransfer")
 
   @@index([householdId])
 }
@@ -164,13 +261,14 @@ model Card {
 }
 
 model Category {
-  id           String        @id @default(cuid())
-  householdId  String
-  name         String
-  icon         String        @default("CircleDollarSign")
-  color        String        @default("#5271FF")
-  household    Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
-  transactions Transaction[]
+  id             String          @id @default(cuid())
+  householdId    String
+  name           String
+  icon           String          @default("CircleDollarSign")
+  color          String          @default("#5271FF")
+  household      Household       @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  transactions   Transaction[]
+  monthlyBudgets MonthlyBudget[]
 
   @@unique([householdId, name])
 }
@@ -224,6 +322,8 @@ model Transaction {
   splits              Split[]
   attachments         Attachment[]
   sharedComments      SharedLedgerComment[]
+  externalMatches     TransactionMatch[]
+  taxDocument         TaxDocument?
 
   @@index([householdId, competenceDate])
   @@index([cardId, dueDate])
@@ -285,27 +385,410 @@ model ImportBatch {
 }
 
 model Split {
-  id            String      @id @default(cuid())
+  id            String         @id @default(cuid())
   transactionId String
   personId      String
-  amount        Decimal     @db.Decimal(14, 2)
-  paidAmount    Decimal     @default(0) @db.Decimal(14, 2)
+  amount        Decimal        @db.Decimal(14, 2)
+  paidAmount    Decimal        @default(0) @db.Decimal(14, 2)
   dueDate       DateTime?
-  status        SplitStatus @default(OPEN)
-  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
-  person        Person      @relation(fields: [personId], references: [id], onDelete: Restrict)
+  status        SplitStatus    @default(OPEN)
+  transaction   Transaction    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  person        Person         @relation(fields: [personId], references: [id], onDelete: Restrict)
+  payments      SplitPayment[]
 
   @@index([personId, status])
 }
 
 model Attachment {
-  id            String         @id @default(cuid())
+  id            String                 @id @default(cuid())
   transactionId String
-  key           String         @unique
+  key           String                 @unique
   fileName      String
   contentType   String
-  kind          AttachmentKind @default(RECEIPT)
-  transaction   Transaction    @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+  kind          AttachmentKind         @default(RECEIPT)
+  createdAt     DateTime               @default(now())
+  uploadStatus  AttachmentUploadStatus @default(READY)
+  ocrStatus     OcrStatus              @default(NOT_REQUESTED)
+  ocrProvider   String?
+  extractedText String?
+  extractedData Json?
+  confidence    Decimal?               @db.Decimal(5, 4)
+  processedAt   DateTime?
+  ocrError      String?
+  transaction   Transaction            @relation(fields: [transactionId], references: [id], onDelete: Cascade)
+}
+
+model SplitPayment {
+  id      String   @id @default(cuid())
+  splitId String
+  amount  Decimal  @db.Decimal(14, 2)
+  paidAt  DateTime @default(now())
+  notes   String?
+  split   Split    @relation(fields: [splitId], references: [id], onDelete: Cascade)
+
+  @@index([splitId, paidAt])
+}
+
+model MonthlyBudget {
+  id          String    @id @default(cuid())
+  householdId String
+  categoryId  String
+  month       DateTime  @db.Date
+  amount      Decimal   @db.Decimal(14, 2)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  category    Category  @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, month, categoryId])
+  @@index([householdId, month])
+}
+
+model FinancialMonthClose {
+  id          String    @id @default(cuid())
+  householdId String
+  closedById  String
+  month       DateTime  @db.Date
+  snapshot    Json
+  closedAt    DateTime  @default(now())
+  household   Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, month])
+  @@index([householdId, closedAt])
+}
+
+model Debt {
+  id                    String        @id @default(cuid())
+  householdId           String
+  name                  String
+  creditor              String?
+  originalAmount        Decimal       @db.Decimal(14, 2)
+  outstandingBalance    Decimal       @db.Decimal(14, 2)
+  monthlyInterestRate   Decimal       @default(0) @db.Decimal(9, 4)
+  installmentAmount     Decimal       @db.Decimal(14, 2)
+  minimumPayment        Decimal?      @db.Decimal(14, 2)
+  dueDay                Int?
+  remainingInstallments Int?
+  status                DebtStatus    @default(ACTIVE)
+  notes                 String?
+  createdAt             DateTime      @default(now())
+  updatedAt             DateTime      @updatedAt
+  household             Household     @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  payments              DebtPayment[]
+
+  @@index([householdId, status])
+}
+
+model DebtPayment {
+  id     String   @id @default(cuid())
+  debtId String
+  amount Decimal  @db.Decimal(14, 2)
+  paidAt DateTime @default(now())
+  notes  String?
+  debt   Debt     @relation(fields: [debtId], references: [id], onDelete: Cascade)
+
+  @@index([debtId, paidAt])
+}
+
+model AccountTransfer {
+  id            String    @id @default(cuid())
+  householdId   String
+  fromAccountId String
+  toAccountId   String
+  amount        Decimal   @db.Decimal(14, 2)
+  transferredAt DateTime
+  description   String?
+  createdAt     DateTime  @default(now())
+  household     Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  fromAccount   Account   @relation("OutgoingTransfer", fields: [fromAccountId], references: [id], onDelete: Cascade)
+  toAccount     Account   @relation("IncomingTransfer", fields: [toAccountId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, transferredAt])
+  @@index([fromAccountId])
+  @@index([toAccountId])
+}
+
+model EconomicIndicator {
+  id        String   @id @default(cuid())
+  code      String
+  name      String
+  unit      String
+  date      DateTime @db.Date
+  value     Decimal  @db.Decimal(18, 6)
+  source    String
+  fetchedAt DateTime @default(now())
+
+  @@unique([code, date])
+  @@index([code, date])
+}
+
+model FinancialConnection {
+  id               String                    @id @default(cuid())
+  householdId      String
+  provider         String                    @default("PLUGGY")
+  externalItemId   String
+  connectorId      String?
+  connectorName    String?
+  status           FinancialConnectionStatus @default(PENDING)
+  consentExpiresAt DateTime?
+  revokedAt        DateTime?
+  lastSyncAt       DateTime?
+  errorCode        String?
+  errorMessage     String?
+  createdAt        DateTime                  @default(now())
+  updatedAt        DateTime                  @updatedAt
+  household        Household                 @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  accounts         ExternalAccount[]
+  syncJobs         SyncJob[]
+  consents         ConsentRecord[]
+
+  @@unique([provider, externalItemId])
+  @@index([householdId, status])
+}
+
+model ExternalAccount {
+  id           String                @id @default(cuid())
+  connectionId String
+  externalId   String
+  type         String
+  subtype      String?
+  name         String
+  numberMasked String?
+  currency     String                @default("BRL")
+  balance      Decimal?              @db.Decimal(14, 2)
+  creditLimit  Decimal?              @db.Decimal(14, 2)
+  raw          Json?
+  lastSyncedAt DateTime              @default(now())
+  connection   FinancialConnection   @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+  transactions ExternalTransaction[]
+
+  @@unique([connectionId, externalId])
+  @@index([connectionId, type])
+}
+
+model ExternalTransaction {
+  id                String            @id @default(cuid())
+  externalAccountId String
+  externalId        String
+  type              String
+  status            String
+  description       String
+  merchant          String?
+  category          String?
+  amount            Decimal           @db.Decimal(14, 2)
+  currency          String            @default("BRL")
+  transactionDate   DateTime
+  raw               Json?
+  firstSeenAt       DateTime          @default(now())
+  updatedAt         DateTime          @updatedAt
+  externalAccount   ExternalAccount   @relation(fields: [externalAccountId], references: [id], onDelete: Cascade)
+  match             TransactionMatch?
+
+  @@unique([externalAccountId, externalId])
+  @@index([externalAccountId, transactionDate])
+}
+
+model SyncJob {
+  id           String              @id @default(cuid())
+  connectionId String
+  status       SyncJobStatus       @default(PENDING)
+  trigger      String
+  cursor       String?
+  result       Json?
+  errorMessage String?
+  startedAt    DateTime?
+  finishedAt   DateTime?
+  createdAt    DateTime            @default(now())
+  connection   FinancialConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@index([connectionId, createdAt])
+}
+
+model ConsentRecord {
+  id                String              @id @default(cuid())
+  connectionId      String
+  externalConsentId String
+  products          Json
+  permissions       Json?
+  grantedAt         DateTime
+  expiresAt         DateTime?
+  revokedAt         DateTime?
+  createdAt         DateTime            @default(now())
+  connection        FinancialConnection @relation(fields: [connectionId], references: [id], onDelete: Cascade)
+
+  @@unique([connectionId, externalConsentId])
+  @@index([connectionId, revokedAt])
+}
+
+model WebhookEvent {
+  id              String     @id @default(cuid())
+  householdId     String?
+  provider        String
+  externalEventId String
+  eventType       String
+  payload         Json
+  receivedAt      DateTime   @default(now())
+  processedAt     DateTime?
+  errorMessage    String?
+  household       Household? @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, externalEventId])
+  @@index([provider, receivedAt])
+  @@index([householdId, receivedAt])
+}
+
+model TransactionMatch {
+  id                    String                 @id @default(cuid())
+  householdId           String
+  externalTransactionId String                 @unique
+  transactionId         String?
+  confidence            Decimal                @db.Decimal(5, 4)
+  status                TransactionMatchStatus @default(SUGGESTED)
+  reasons               Json?
+  createdAt             DateTime               @default(now())
+  updatedAt             DateTime               @updatedAt
+  household             Household              @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  externalTransaction   ExternalTransaction    @relation(fields: [externalTransactionId], references: [id], onDelete: Cascade)
+  transaction           Transaction?           @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+
+  @@index([householdId, status])
+  @@index([transactionId])
+}
+
+model TaxProfile {
+  id          String         @id @default(cuid())
+  householdId String
+  type        TaxProfileType
+  name        String
+  document    String?
+  taxRegime   TaxRegime      @default(NOT_APPLICABLE)
+  cnae        String?
+  state       String?
+  cityCode    String?
+  active      Boolean        @default(true)
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  household   Household      @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  documents   TaxDocument[]
+
+  @@index([householdId, type, active])
+}
+
+model TaxRuleVersion {
+  id          String          @id @default(cuid())
+  code        String          @unique
+  name        String
+  validFrom   DateTime        @db.Date
+  validTo     DateTime?       @db.Date
+  sourceUrl   String
+  rules       Json
+  active      Boolean         @default(true)
+  fetchedAt   DateTime        @default(now())
+  simulations TaxSimulation[]
+}
+
+model TaxDocument {
+  id                 String            @id @default(cuid())
+  householdId        String
+  taxProfileId       String?
+  transactionId      String?           @unique
+  sourceKey          String
+  sourceHash         String
+  fileName           String
+  documentType       String
+  accessKey          String?
+  issuerName         String?
+  issuerDocument     String?
+  issuedAt           DateTime?
+  totalAmount        Decimal           @default(0) @db.Decimal(14, 2)
+  cbsAmount          Decimal           @default(0) @db.Decimal(14, 2)
+  ibsStateAmount     Decimal           @default(0) @db.Decimal(14, 2)
+  ibsCityAmount      Decimal           @default(0) @db.Decimal(14, 2)
+  selectiveTaxAmount Decimal           @default(0) @db.Decimal(14, 2)
+  status             TaxDocumentStatus @default(IMPORTED)
+  calculationSource  String?
+  ruleVersion        String?
+  rawSummary         Json?
+  createdAt          DateTime          @default(now())
+  household          Household         @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  taxProfile         TaxProfile?       @relation(fields: [taxProfileId], references: [id], onDelete: SetNull)
+  transaction        Transaction?      @relation(fields: [transactionId], references: [id], onDelete: SetNull)
+  items              TaxDocumentItem[]
+
+  @@unique([householdId, sourceHash])
+  @@index([householdId, issuedAt])
+}
+
+model TaxDocumentItem {
+  id                 String      @id @default(cuid())
+  taxDocumentId      String
+  itemNumber         Int
+  description        String
+  productCode        String?
+  classification     String?
+  taxTreatment       String?
+  quantity           Decimal?    @db.Decimal(14, 4)
+  grossAmount        Decimal     @db.Decimal(14, 2)
+  taxBase            Decimal?    @db.Decimal(14, 2)
+  cbsRate            Decimal?    @db.Decimal(9, 4)
+  ibsStateRate       Decimal?    @db.Decimal(9, 4)
+  ibsCityRate        Decimal?    @db.Decimal(9, 4)
+  selectiveTaxRate   Decimal?    @db.Decimal(9, 4)
+  cbsAmount          Decimal     @default(0) @db.Decimal(14, 2)
+  ibsStateAmount     Decimal     @default(0) @db.Decimal(14, 2)
+  ibsCityAmount      Decimal     @default(0) @db.Decimal(14, 2)
+  selectiveTaxAmount Decimal     @default(0) @db.Decimal(14, 2)
+  creditAllowed      Boolean?
+  taxDocument        TaxDocument @relation(fields: [taxDocumentId], references: [id], onDelete: Cascade)
+
+  @@unique([taxDocumentId, itemNumber])
+}
+
+model TaxSimulation {
+  id            String         @id @default(cuid())
+  householdId   String
+  ruleVersionId String
+  mode          TaxProfileType
+  operationDate DateTime       @db.Date
+  input         Json
+  result        Json
+  createdById   String
+  createdAt     DateTime       @default(now())
+  household     Household      @relation(fields: [householdId], references: [id], onDelete: Cascade)
+  ruleVersion   TaxRuleVersion @relation(fields: [ruleVersionId], references: [id], onDelete: Restrict)
+
+  @@index([householdId, createdAt])
+}
+
+model TaxLedgerEntry {
+  id                 String             @id @default(cuid())
+  householdId        String
+  kind               TaxLedgerEntryKind
+  competenceDate     DateTime           @db.Date
+  description        String
+  cbsAmount          Decimal            @default(0) @db.Decimal(14, 2)
+  ibsAmount          Decimal            @default(0) @db.Decimal(14, 2)
+  selectiveTaxAmount Decimal            @default(0) @db.Decimal(14, 2)
+  sourceReference    String?
+  createdAt          DateTime           @default(now())
+  household          Household          @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@index([householdId, competenceDate, kind])
+}
+
+model TaxCashback {
+  id              String    @id @default(cuid())
+  householdId     String
+  competenceDate  DateTime  @db.Date
+  estimatedAmount Decimal   @default(0) @db.Decimal(14, 2)
+  receivedAmount  Decimal   @default(0) @db.Decimal(14, 2)
+  inputs          Json?
+  notes           String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  household       Household @relation(fields: [householdId], references: [id], onDelete: Cascade)
+
+  @@unique([householdId, competenceDate])
 }
 
 model AuditLog {

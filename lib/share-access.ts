@@ -1,8 +1,9 @@
 import { createHash } from "crypto";
 import { SignJWT, jwtVerify } from "jose";
 import { cookies } from "next/headers";
+import { authSecret } from "@/lib/security";
 
-const key = () => new TextEncoder().encode(process.env.AUTH_SECRET || "development-only-change-me-please-32chars");
+const key = () => new TextEncoder().encode(authSecret());
 const cookieName = (linkId: string) => `finora_share_${linkId}`;
 
 export const shareTokenHash = (token: string) => createHash("sha256").update(token).digest("hex");

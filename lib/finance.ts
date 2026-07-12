@@ -9,6 +9,13 @@ export function installmentSchedule(total: number, count: number, firstDate: Dat
   }));
 }
 
+export function addMonthsClamped(date: Date, months: number) {
+  const targetYear = date.getFullYear();
+  const targetMonth = date.getMonth() + months;
+  const lastDay = new Date(targetYear, targetMonth + 1, 0).getDate();
+  return new Date(targetYear, targetMonth, Math.min(date.getDate(), lastDay), date.getHours(), date.getMinutes(), date.getSeconds(), date.getMilliseconds());
+}
+
 export function parseBrazilianMoney(value: unknown) {
   if (typeof value === "number") return value;
   const cleaned = String(value ?? "").replace(/R\$\s?/gi, "").replace(/\./g, "").replace(",", ".").trim();

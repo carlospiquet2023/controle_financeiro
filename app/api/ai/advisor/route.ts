@@ -6,6 +6,7 @@ import { releaseDailyAnalysis, reserveDailyAnalysis } from "@/lib/ai-quota";
 import { requireMembership } from "@/lib/auth";
 import { db } from "@/lib/db";
 import { addUtcMonths, monthStartUtc } from "@/lib/format";
+import { getEconomicIndicators } from "@/lib/economic-indicators";
 
 const requestSchema = z.object({ message: z.string().trim().min(1).max(1200), month: z.string().regex(/^20\d{2}-(0[1-9]|1[0-2])$/) });
 
@@ -22,10 +23,11 @@ export async function POST(request: Request) {
     const month = monthStartUtc(input.month);
     const nextMonth = addUtcMonths(month, 1);
     const forecastEnd = addUtcMonths(month, 12);
-    const [current, future, splits] = await Promise.all([
+    const [current, future, splits, economicContext] = await Promise.all([
       db.transaction.findMany({ where: { householdId: membership.householdId, competenceDate: { gte: month, lt: nextMonth }, status: { notIn: ["CANCELED", "REFUNDED"] } }, include: { category: true, card: true } }),
       db.transaction.findMany({ where: { householdId: membership.householdId, competenceDate: { gte: month, lt: forecastEnd }, type: "EXPENSE", status: { notIn: ["CANCELED", "REFUNDED"] } }, select: { amount: true, competenceDate: true } }),
       db.split.findMany({ where: { transaction: { householdId: membership.householdId, status: { notIn: ["CANCELED", "REFUNDED"] } }, status: { not: "PAID" } }, select: { amount: true, paidAmount: true } }),
+      getEconomicIndicators().catch(() => []),
     ]);
     const expenses = current.filter((item) => item.type === "EXPENSE");
     const income = current.filter((item) => item.type === "INCOME").reduce((sum, item) => sum + Number(item.amount), 0);
@@ -47,6 +49,7 @@ export async function POST(request: Request) {
       futureExpenseCommitmentCount: future.filter((item) => item.competenceDate >= nextMonth).length,
       openFamilyReimbursements: splits.reduce((sum, item) => sum + Number(item.amount) - Number(item.paidAmount), 0),
       ...health,
+      economicContext,
     };
     const generated = await createEconomicAdvice(input.message, snapshot);
     const grounded = groundedAdviceCopy(snapshot);

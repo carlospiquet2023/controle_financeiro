@@ -3,8 +3,6 @@ node_modules
 *.tsbuildinfo
 .env
 .env.local
-dados_ia.md
-r2.md
 .railway
 *.log
 Planilha-dividas julho.xlsx
