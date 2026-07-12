@@ -6,6 +6,7 @@ import { money } from "@/lib/format";
 
 type Advice = { headline: string; summary: string; riskLevel: "GREEN" | "YELLOW" | "ORANGE" | "RED" | "INCOMPLETE"; insights: { title: string; explanation: string; amount: number | null }[]; nextActions: string[]; basis: string[]; caveat: string };
 type Answer = { question: string; adviceId: string; advice: Advice; snapshot: { health: string; commitmentRate: number | null; income: number; expenses: number } };
+type Usage = { used: number; remaining: number; limit: number };
 
 const suggestions = ["Faça um diagnóstico do meu mês", "Onde posso aliviar os próximos meses?", "Quais valores precisam de atenção primeiro?"];
 
@@ -15,6 +16,7 @@ export function EconomicAdvisor({ open, month, onClose }: { open: boolean; month
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
   const [feedback, setFeedback] = useState<Record<string, string>>({});
+  const [usage, setUsage] = useState<Usage | null>(null);
   const initialized = useRef(false);
   const endRef = useRef<HTMLDivElement>(null);
   useEffect(() => { if (open && !initialized.current) { initialized.current = true; void ask("Faça um diagnóstico objetivo do meu mês e diga qual é a prioridade número um."); } }, [open]);
@@ -22,12 +24,15 @@ export function EconomicAdvisor({ open, month, onClose }: { open: boolean; month
   useEffect(() => { initialized.current = false; setAnswers([]); }, [month]);
 
   async function ask(question = text) {
-    const clean = question.trim(); if (clean.length < 4 || loading) return;
-    setLoading(true); setError(""); setText("");
+    const clean = question.trim(); if (!clean || loading || usage?.remaining === 0) return;
+    setLoading(true); setError("");
     try {
       const response = await fetch("/api/ai/advisor", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: clean, month: month.slice(0, 7) }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.error || "Não foi possível gerar a análise.");
+      const data = await response.json();
+      if (data.usage) setUsage(data.usage);
+      if (!response.ok) throw new Error(data.error || "Não foi possível gerar a análise.");
       setAnswers((current) => [...current, { question: clean, adviceId: data.adviceId, advice: data.advice, snapshot: data.snapshot }]);
+      setText("");
     } catch (cause) { setError(cause instanceof Error ? cause.message : "Não foi possível gerar a análise."); } finally { setLoading(false); }
   }
 
@@ -51,10 +56,10 @@ export function EconomicAdvisor({ open, month, onClose }: { open: boolean; month
         <div className="advice-feedback"><span>{feedback[answer.adviceId] ? "Revisão registrada" : "Esta leitura ajudou?"}</span><button className={feedback[answer.adviceId] === "HELPFUL" ? "selected" : ""} onClick={() => review(answer.adviceId, "HELPFUL")}><ThumbsUp size={14} />Sim</button><button className={feedback[answer.adviceId] === "DISAGREE" ? "selected" : ""} onClick={() => review(answer.adviceId, "DISAGREE")}><ThumbsDown size={14} />Discordo</button></div>
       </article>)}
       {loading && <div className="advisor-thinking"><div className="advisor-orb"><span /><Sparkles /></div><span><b>Analisando seu mês…</b><small>Conferindo faturas, parcelas e próximos meses</small></span><i /><i /><i /></div>}
-      {error && <div className="advisor-error"><AlertTriangle size={16} />{error}</div>}
+      {error && <div className="advisor-error" role="alert"><AlertTriangle size={16} />{error}</div>}
       <div ref={endRef} />
     </div>
-    <footer className="advisor-composer"><div className="advisor-shortcuts">{suggestions.slice(1).map((suggestion) => <button key={suggestion} onClick={() => ask(suggestion)}>{suggestion}</button>)}</div><div><textarea value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void ask(); } }} rows={2} placeholder="Pergunte sobre seu mês ou simule uma decisão…" /><button aria-label="Enviar" disabled={loading || text.trim().length < 4} onClick={() => ask()}><Send size={17} /></button></div><p><Check size={11} />Não indica investimentos nem movimenta dinheiro sem sua confirmação.</p></footer>
+    <footer className="advisor-composer"><div className="advisor-shortcuts">{suggestions.slice(1).map((suggestion) => <button key={suggestion} disabled={loading || usage?.remaining === 0} onClick={() => ask(suggestion)}>{suggestion}</button>)}</div><form onSubmit={(event) => { event.preventDefault(); void ask(); }}><textarea value={text} onChange={(event) => setText(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void ask(); } }} rows={2} disabled={usage?.remaining === 0} placeholder={usage?.remaining === 0 ? "Limite diário atingido" : "Pergunte sobre seu mês ou simule uma decisão…"} /><button type="submit" aria-label="Enviar" disabled={loading || !text.trim() || usage?.remaining === 0}><Send size={17} /></button></form><p><Check size={11} />Não indica investimentos nem movimenta dinheiro sem sua confirmação.<span>{usage ? `${usage.remaining} de ${usage.limit} análises restantes hoje` : "Limite de 5 análises por dia"}</span></p></footer>
   </aside></>;
 }
 
