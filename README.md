@@ -2,6 +2,10 @@
 
 Central financeira familiar criada para responder quatro perguntas sem ambiguidade: quanto a família paga no mês, em qual cartão, quem precisa devolver e quanto já está comprometido no futuro.
 
+> **Criação, titularidade e desenvolvimento:** Carlao Antonio de Oliveira Piquet — carlos.piquet2016@gmail.com
+
+Copyright © 2026 Carlao Antonio de Oliveira Piquet. Todos os direitos reservados. Este projeto é software proprietário e não concede permissão de uso, cópia, modificação, distribuição ou comercialização. Consulte [LICENSE](./LICENSE), [NOTICE.md](./NOTICE.md) e [AUTHORS.md](./AUTHORS.md).
+
 ## O que está entregue
 
 - Login com senha protegida por bcrypt, sessão HTTP-only e isolamento por grupo familiar.
@@ -14,6 +18,7 @@ Central financeira familiar criada para responder quatro perguntas sem ambiguida
 - Cadastros funcionais de cartões, contas, pessoas e categorias.
 - Endpoint de upload temporário para comprovantes no Cloudflare R2; as chaves nunca são expostas ao navegador.
 - Assistente Groq para transformar texto livre em lançamento estruturado; ele sugere e o usuário confirma antes de gravar.
+- Conselho Econômico com cálculos determinísticos, IA explicável, justificativas e revisão do usuário.
 - Importador conciliado de Excel/CSV: reconhece fórmulas, cores, parcelas e totais por cartão da planilha original.
 - O arquivo original de cada importação é preservado no R2, o lote fica auditável e pode ser desfeito sem afetar lançamentos manuais.
 - Docker, migration versionada, health check e configuração Railway.
@@ -64,3 +69,9 @@ O Railway usa `Dockerfile`, aplica as migrations antes de iniciar e monitora `/a
 - vínculo de cada lançamento ao lote que o criou;
 - trilha de auditoria para importar, desfazer, pagar, cancelar e revisar cartão;
 - isolamento por grupo familiar em todas as ações do servidor.
+
+## Propriedade intelectual
+
+O repositório é público para transparência e versionamento, mas não é open source. Bibliotecas e materiais de terceiros continuam sob suas próprias licenças. Para solicitar autorização de uso ou uma licença comercial, escreva para carlos.piquet2016@gmail.com.
+
+Para reforçar a prova de autoria e titularidade no Brasil, o titular pode solicitar o Registro de Programa de Computador pelo sistema e-Software do INPI, utilizando uma versão estável do código e seu resumo hash.

@@ -1,0 +1,69 @@
+FINORA PROPRIETARY LICENSE
+Version 1.0 — July 2026
+
+Copyright (c) 2026 Carlao Antonio de Oliveira Piquet
+Contact: carlos.piquet2016@gmail.com
+All rights reserved.
+
+1. OWNERSHIP
+
+Finora, including its original source code, architecture, database model,
+business rules, financial reconciliation flows, user experience, visual
+identity, documentation, prompts, texts and other original materials in this
+repository (collectively, the "Software"), is proprietary work owned by
+Carlao Antonio de Oliveira Piquet, except for Third-Party Materials described
+in Section 5.
+
+2. NO LICENSE GRANTED
+
+No permission is granted to use, copy, modify, adapt, merge, publish,
+distribute, sublicense, sell, rent, host, deploy, commercialize, reverse
+engineer, create derivative works from, or use the Software or any substantial
+part of it to train, evaluate or operate machine-learning systems without the
+prior express written permission of the copyright owner.
+
+Publication in a public GitHub repository permits only the access, viewing and
+forking rights required by GitHub's Terms of Service. It does not grant any
+additional copyright, patent, trademark or commercial license.
+
+3. AUTHORIZED USE
+
+Any authorization must be made in writing by the copyright owner and may be
+subject to separate commercial, confidentiality, attribution and usage terms.
+Silence, access to the repository or contribution of code does not constitute
+authorization.
+
+4. ATTRIBUTION AND PROPRIETARY NOTICES
+
+All copyright, authorship and proprietary notices must be preserved. No person
+or organization may claim authorship, ownership, sponsorship or endorsement of
+the Software without prior written permission.
+
+5. THIRD-PARTY MATERIALS
+
+Third-party libraries, frameworks, fonts, icons, tools and other materials are
+owned by their respective copyright holders and remain subject to their own
+licenses. This License does not restrict rights that were validly granted by
+those third-party licenses and does not claim ownership over those materials.
+
+6. TRADEMARKS AND BRAND
+
+No right is granted to use the Finora name, visual identity, marks, product
+presentation or confusingly similar identifiers in another product or service.
+
+7. NO WARRANTY
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE AND NON-INFRINGEMENT. TO THE MAXIMUM EXTENT PERMITTED BY LAW, THE
+COPYRIGHT OWNER SHALL NOT BE LIABLE FOR ANY CLAIM, LOSS OR OTHER LIABILITY
+ARISING FROM UNAUTHORIZED OR AUTHORIZED USE OF THE SOFTWARE.
+
+8. ENFORCEMENT
+
+Unauthorized use may result in suspension of access and the pursuit of the
+remedies available under applicable copyright, software, civil and criminal
+law. If any provision is unenforceable, the remaining provisions remain in
+effect.
+
+To request a license, contact: carlos.piquet2016@gmail.com

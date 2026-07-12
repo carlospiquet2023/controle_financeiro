@@ -2,6 +2,15 @@
   "name": "finora",
   "version": "1.0.0",
   "private": true,
+  "author": {
+    "name": "Carlao Antonio de Oliveira Piquet",
+    "email": "carlos.piquet2016@gmail.com"
+  },
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/carlospiquet2023/controle_financeiro.git"
+  },
   "engines": {
     "node": ">=22"
   },
