@@ -69,3 +69,28 @@ button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible,te
 @media (max-width:820px) { .commitments-heading { align-items:end; }.share-ledger > header { grid-template-columns:1fr auto; }.share-ledger header .share-brand { grid-column:1/-1; }.share-table { overflow-x:auto; }.share-table-head,.share-row { min-width:720px; }.share-comments { min-width:720px; padding-left:18px; }.share-create { grid-template-columns:1fr; }.share-create .button { width:100%; } }
 @media (max-width:600px) { .commitments-heading { grid-template-columns:1fr; }.commitments-heading > button { width:100%; justify-content:center; }.share-modal { padding:17px; }.generated-share > div { grid-template-columns:1fr; }.generated-share button { height:34px; justify-content:center; }.share-shell { padding:13px; }.share-unlock,.share-invalid { padding:25px 19px; }.share-ledger { width:calc(100% - 18px); padding-top:9px; }.share-ledger > header { padding:17px; grid-template-columns:1fr; border-radius:14px 14px 0 0; }.share-ledger header .share-brand { grid-column:auto; }.share-ledger header aside { text-align:left; }.share-ledger header aside strong { font-size:18px; } }
 @media (max-width:820px) { .hamburger,.advisor-trigger,.add-button,.mobile-drawer-head > button,.icon-button { min-width:44px; min-height:44px; }.mobile-drawer nav button,.mobile-drawer-bottom button { min-height:48px; }.ownership-panel { grid-template-columns:48px 1fr; }.ownership-panel > small { grid-column:1/-1; text-align:left; } }
+
+@media (max-width:600px) {
+  .share-ledger { width:100%; padding-top:8px; }
+  .share-ledger > header,.share-readonly,.share-table { margin-left:8px; margin-right:8px; }
+  .share-ledger > header { padding:17px; }
+  .share-ledger header h1 { font-size:20px; line-height:1.18; }
+  .share-ledger header p { line-height:1.45; }
+  .share-readonly { min-height:0; padding:10px 13px; align-items:flex-start; line-height:1.45; }
+  .share-readonly svg { flex:0 0 auto; margin-top:1px; }
+  .share-table { overflow:visible; border-radius:0 0 14px 14px; }
+  .share-table-head { display:none; }
+  .share-table > article { padding:14px; }
+  .share-row { min-width:0; min-height:0; padding:0; grid-template-columns:minmax(0,1fr) auto; gap:7px 12px; }
+  .share-transaction { grid-column:1/-1; }
+  .share-transaction b { font-size:12px; line-height:1.35; white-space:normal; }
+  .share-row > span:not(.share-transaction) { width:max-content; max-width:100%; padding:4px 7px; color:#526177; background:#f6f8fb; border-radius:999px; font-size:9px; }
+  .share-row > strong { grid-column:2; grid-row:2; font-size:12px; text-align:right; }
+  .share-row > em { grid-column:2; grid-row:3; justify-self:end; }
+  .share-comments { min-width:0; padding:10px 0 0; }
+  .share-comments > p { padding:7px 8px; grid-template-columns:14px 1fr; border-radius:8px; }
+  .share-comments > p small { grid-column:2; margin-top:2px; }
+  .share-comments form { grid-template-columns:minmax(0,1fr) auto; }
+  .share-comments input { height:31px; min-width:0; padding:0 10px; border-radius:8px; font-size:9px; }
+  .share-comments button { height:31px; padding:0 8px; }
+}
