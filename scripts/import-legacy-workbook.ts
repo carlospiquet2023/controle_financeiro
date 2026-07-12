@@ -14,10 +14,17 @@ if (!databaseUrl) throw new Error("DATABASE_PUBLIC_URL ou DATABASE_URL precisa e
 const prisma = new PrismaClient({ datasources: { db: { url: databaseUrl } } });
 
 async function main(path: string) {
-  const owners = await prisma.user.findMany({
-    where: process.env.IMPORT_OWNER_EMAIL ? { email: process.env.IMPORT_OWNER_EMAIL } : { memberships: { some: { role: "OWNER" } } },
-    include: { memberships: { where: { role: "OWNER" }, take: 1 } },
-  });
+  let owners = await prisma.user.findMany({ where: process.env.IMPORT_OWNER_EMAIL ? { email: process.env.IMPORT_OWNER_EMAIL } : { memberships: { some: { role: "OWNER" } } }, include: { memberships: { where: { role: "OWNER" } } } });
+  if (!process.env.IMPORT_OWNER_EMAIL && owners.length > 1) {
+    const candidates = [];
+    for (const owner of owners) {
+      for (const membership of owner.memberships) {
+        const legacyRows = await prisma.transaction.count({ where: { householdId: membership.householdId, importBatchId: null, externalRef: { startsWith: "import-" } } });
+        if (legacyRows > 0) candidates.push({ ...owner, memberships: [membership] });
+      }
+    }
+    owners = candidates;
+  }
   if (owners.length !== 1 || !owners[0].memberships[0]) throw new Error("Defina IMPORT_OWNER_EMAIL quando houver zero ou mais de um proprietário.");
   const user = owners[0];
   const householdId = user.memberships[0].householdId;
@@ -81,7 +88,7 @@ async function main(path: string) {
     await tx.importBatch.update({ where: { id: batch.id }, data: { importedCount: imported } });
     await tx.auditLog.create({ data: { householdId, actorId: user.id, entity: "Import", entityId: batch.id, action: replaceLegacy ? "REPLACE_LEGACY_IMPORT" : "IMPORT_TRANSACTIONS", after: { imported, removedTransactions, removedCards, currentMonthTotal: parsed.calculatedTotal, reconciled: true } } });
     return { imported, removedTransactions, removedCards, batchId: batch.id };
-  });
+  }, { maxWait: 10_000, timeout: 60_000 });
   console.log(JSON.stringify({ ok: true, rows: parsed.rows.length, currentMonthTotal: parsed.calculatedTotal, groups: parsed.groups.length, ...result }));
 }
 
