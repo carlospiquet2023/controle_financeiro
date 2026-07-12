@@ -3,9 +3,9 @@
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
 import dynamic from "next/dynamic";
-import { AlertCircle, ArrowDownLeft, ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, ChevronRight, CircleDollarSign, CreditCard, FileSpreadsheet, LayoutDashboard, LogOut, Menu, Plus, ReceiptText, Search, Settings, Sparkles, TrendingDown, UploadCloud, UserPlus, Users, WalletCards, X } from "lucide-react";
-import { assignTransactionCard, cancelTransaction, logout, markPaid } from "@/app/actions";
-import { money, monthLabel, shortDate } from "@/lib/format";
+import { AlertCircle, ArrowDownLeft, ArrowLeft, ArrowRight, BadgeCheck, CalendarDays, Check, ChevronRight, CircleDollarSign, CreditCard, FileSpreadsheet, LayoutDashboard, LogOut, Menu, Pencil, Plus, ReceiptText, Save, Search, Settings, Sparkles, TrendingDown, UploadCloud, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { assignTransactionCard, cancelTransaction, logout, markPaid, updateTransaction } from "@/app/actions";
+import { money, monthLabel } from "@/lib/format";
 import { ImportPanel } from "@/components/import-panel";
 import { ManagementModal } from "@/components/management-modal";
 import { TransactionForm } from "@/components/transaction-form";
@@ -21,8 +21,9 @@ type Transaction = { id: string; description: string; amount: number; status: st
 type ForecastItem = { amount: number; competenceDate: string };
 type Receivable = { person: string; amount: number };
 type ImportHistory = { id: string; fileName: string; status: string; rowCount: number; importedCount: number; total: number; createdAt: string };
+type ExpenseSummary = { cardId: string | null; status: string; amount: number; count: number };
 
-type DashboardProps = { userName: string; householdName: string; selectedMonth: string; accounts: Account[]; cards: Card[]; categories: Category[]; people: Person[]; transactions: Transaction[]; forecast: ForecastItem[]; receivables: Receivable[]; imports: ImportHistory[] };
+type DashboardProps = { userName: string; householdName: string; selectedMonth: string; accounts: Account[]; cards: Card[]; categories: Category[]; people: Person[]; transactions: Transaction[]; overviewTransactions: Transaction[]; transactionTotal: number; transactionPage: number; transactionsPerPage: number; expenseSummary: ExpenseSummary[]; forecast: ForecastItem[]; receivables: Receivable[]; imports: ImportHistory[] };
 
 const menuItems: { id: View; label: string; short: string; icon: React.ReactNode }[] = [
   { id: "overview", label: "Central financeira", short: "Início", icon: <LayoutDashboard /> },
@@ -35,7 +36,7 @@ const menuItems: { id: View; label: string; short: string; icon: React.ReactNode
 ];
 
 export function Dashboard(props: DashboardProps) {
-  const { userName, householdName, selectedMonth, accounts, cards, categories, people, transactions, forecast, receivables, imports } = props;
+  const { userName, householdName, selectedMonth, accounts, cards, categories, people, transactions, overviewTransactions, transactionTotal, transactionPage, transactionsPerPage, expenseSummary, forecast, receivables, imports } = props;
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [managing, setManaging] = useState<ManagementKind | null>(null);
@@ -50,24 +51,25 @@ export function Dashboard(props: DashboardProps) {
 
   const active = transactions.filter((t) => !["CANCELED", "REFUNDED"].includes(t.status));
   const expenses = active.filter((t) => t.type === "EXPENSE");
-  const invoiceTotal = expenses.reduce((sum, t) => sum + t.amount, 0);
-  const paid = expenses.filter((t) => t.status === "PAID").reduce((sum, t) => sum + t.amount, 0);
+  const overviewExpenses = overviewTransactions.filter((t) => t.type === "EXPENSE");
+  const invoiceTotal = expenseSummary.reduce((sum, item) => sum + item.amount, 0);
+  const paid = expenseSummary.filter((item) => item.status === "PAID").reduce((sum, item) => sum + item.amount, 0);
   const pending = invoiceTotal - paid;
   const receive = receivables.reduce((sum, item) => sum + item.amount, 0);
   const projections = useMemo(() => Array.from({ length: 12 }, (_, index) => {
     const date = new Date(month.getFullYear(), month.getMonth() + index, 1);
-    const total = forecast.filter((item) => { const competence = new Date(item.competenceDate); return competence.getFullYear() === date.getFullYear() && competence.getMonth() === date.getMonth(); }).reduce((sum, item) => sum + item.amount, 0);
+    const total = forecast.filter((item) => { const competence = new Date(item.competenceDate); return competence.getUTCFullYear() === date.getFullYear() && competence.getUTCMonth() === date.getMonth(); }).reduce((sum, item) => sum + item.amount, 0);
     return { date, total };
   }), [forecast, selectedMonth]);
   const invoiceGroups = useMemo(() => {
     const groups = cards.map((card) => {
-      const rows = expenses.filter((item) => item.card?.id === card.id);
-      return { ...card, total: rows.reduce((sum, item) => sum + item.amount, 0), paid: rows.filter((item) => item.status === "PAID").reduce((sum, item) => sum + item.amount, 0), count: rows.length, review: false };
+      const rows = expenseSummary.filter((item) => item.cardId === card.id);
+      return { ...card, total: rows.reduce((sum, item) => sum + item.amount, 0), paid: rows.filter((item) => item.status === "PAID").reduce((sum, item) => sum + item.amount, 0), count: rows.reduce((sum, item) => sum + item.count, 0), review: false };
     });
-    const unknown = expenses.filter((item) => !item.card);
-    if (unknown.length) groups.push({ id: "unassigned", name: "Não identificado", color: "#64748B", creditLimit: 0, total: unknown.reduce((sum, item) => sum + item.amount, 0), paid: unknown.filter((item) => item.status === "PAID").reduce((sum, item) => sum + item.amount, 0), count: unknown.length, review: true });
+    const unknown = expenseSummary.filter((item) => !item.cardId);
+    if (unknown.length) groups.push({ id: "unassigned", name: "Não identificado", color: "#64748B", creditLimit: 0, total: unknown.reduce((sum, item) => sum + item.amount, 0), paid: unknown.filter((item) => item.status === "PAID").reduce((sum, item) => sum + item.amount, 0), count: unknown.reduce((sum, item) => sum + item.count, 0), review: true });
     return groups.sort((a, b) => b.total - a.total);
-  }, [cards, expenses]);
+  }, [cards, expenseSummary]);
   const viewName = view === "overview" ? "Central financeira" : menuItems.find((item) => item.id === view)?.label || "Configurações";
 
   return <main className="app-shell" id="main-content">
@@ -83,9 +85,9 @@ export function Dashboard(props: DashboardProps) {
         <div className="top-actions"><button className="advisor-trigger" onClick={() => { setMobileMenu(false); setAdvisorOpen(true); }}><span className="mini-orb"><i /><Sparkles size={15} /></span><div><b>Conselho Econômico</b><small>Analise antes de decidir</small></div></button><div className="user-badge"><span>{userName.charAt(0).toUpperCase()}</span><div><b>{userName}</b><small>Administrador da família</small></div></div><button className="button primary add-button" onClick={() => setAdding(true)}><Plus size={17} />Novo lançamento</button></div>
       </header>
 
-      {view === "overview" && <Overview month={month} total={invoiceTotal} paid={paid} pending={pending} receive={receive} transactions={expenses} groups={invoiceGroups} projections={projections.slice(0, 6)} onInvoices={() => navigate("invoices")} onTransactions={() => navigate("transactions")} onPlanning={() => navigate("planning")} onImport={() => navigate("import")} />}
+      {view === "overview" && <Overview month={month} total={invoiceTotal} paid={paid} pending={pending} receive={receive} transactions={overviewExpenses} groups={invoiceGroups} projections={projections.slice(0, 6)} onInvoices={() => navigate("invoices")} onTransactions={() => navigate("transactions")} onPlanning={() => navigate("planning")} onImport={() => navigate("import")} />}
       {view === "invoices" && <InvoicesView month={month} groups={invoiceGroups} total={invoiceTotal} transactions={expenses} cards={cards} />}
-      {view === "transactions" && <TransactionsView transactions={active} />}
+      {view === "transactions" && <TransactionsView transactions={active} total={transactionTotal} page={transactionPage} pageSize={transactionsPerPage} month={selectedMonth.slice(0, 7)} />}
       {view === "accounts" && <AccountsView accounts={accounts} onAdd={() => setManaging("account")} />}
       {view === "people" && <PeopleView people={people} receivables={receivables} onAdd={() => setManaging("person")} />}
       {view === "planning" && <PlanningView projections={projections} />}
@@ -132,10 +134,13 @@ function UnassignedReview({ transactions, cards }: { transactions: Transaction[]
   return <section className="panel review-panel"><PanelHeading eyebrow="PRECISA DE ATENÇÃO" title="Descobrir em qual cartão foi cobrado" /><p>Esses lançamentos vieram do grupo “não sei qual cartão usou”. Associe quando conferir a fatura.</p><div className="review-list">{transactions.map((item) => <div key={item.id}><span><b>{item.description}</b><small>{item.notes || "Sem observação"}</small></span><strong>{money(item.amount)}</strong><select value={selected[item.id] || ""} onChange={(event) => setSelected((current) => ({ ...current, [item.id]: event.target.value }))}><option value="">Escolher cartão…</option>{cards.map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}</select><button disabled={pending || !selected[item.id]} onClick={() => assign(item.id)}>Associar</button></div>)}</div>{message && <div className="notice"><Check size={15} />{message}</div>}</section>;
 }
 
-function TransactionsView({ transactions }: { transactions: Transaction[] }) {
+function TransactionsView({ transactions, total, page, pageSize, month }: { transactions: Transaction[]; total: number; page: number; pageSize: number; month: string }) {
+  const router = useRouter();
   const [query, setQuery] = useState(""); const [status, setStatus] = useState("ALL");
   const filtered = transactions.filter((item) => (status === "ALL" || item.status === status) && `${item.description} ${item.category} ${item.card?.name || ""}`.toLocaleLowerCase("pt-BR").includes(query.toLocaleLowerCase("pt-BR")));
-  return <section className="panel full-panel"><div className="list-toolbar"><div><span className="kicker">MOVIMENTOS</span><h2>{filtered.length} lançamentos encontrados</h2></div><div className="filters"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar descrição, cartão…" /></label><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="ALL">Todos os status</option><option value="PENDING">Pendentes</option><option value="PLANNED">Previstos</option><option value="PAID">Pagos</option></select></div></div><TransactionList transactions={filtered} empty="Nenhum lançamento corresponde aos filtros." detailed /></section>;
+  const pageCount = Math.max(Math.ceil(total / pageSize), 1);
+  const go = (next: number) => router.push(`/?month=${month}&page=${next}#transactions`);
+  return <section className="panel full-panel"><div className="list-toolbar"><div><span className="kicker">MOVIMENTOS</span><h2>{total} lançamentos · página {page} de {pageCount}</h2></div><div className="filters"><label><Search size={16} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Buscar nesta página…" /></label><select value={status} onChange={(event) => setStatus(event.target.value)}><option value="ALL">Todos os status</option><option value="PENDING">Pendentes</option><option value="PLANNED">Previstos</option><option value="PAID">Pagos</option></select></div></div><TransactionList transactions={filtered} empty="Nenhum lançamento corresponde aos filtros." /><nav className="pagination" aria-label="Paginação dos lançamentos"><button disabled={page <= 1} onClick={() => go(page - 1)}><ArrowLeft size={14} />Anterior</button><span>{Math.min((page - 1) * pageSize + 1, total)}–{Math.min(page * pageSize, total)} de {total}</span><button disabled={page >= pageCount} onClick={() => go(page + 1)}>Próxima<ArrowRight size={14} /></button></nav></section>;
 }
 
 function AccountsView({ accounts, onAdd }: { accounts: Account[]; onAdd: () => void }) { return <section className="panel full-panel"><PanelHeading eyebrow="CONTAS" title="Onde o dinheiro está" action="Adicionar conta" onAction={onAdd} /><div className="entity-grid">{accounts.length ? accounts.map((account) => <article className="entity-card" key={account.id}><i style={{ background: account.color }}><WalletCards /></i><div><b>{account.name}</b><small>{account.institution || accountType(account.type)}</small></div><span><small>Saldo inicial</small><strong>{money(account.openingBalance)}</strong></span></article>) : <EmptyAction text="Nenhuma conta cadastrada" detail="Cadastre a conta usada para pagar suas faturas." action="Adicionar primeira conta" onAction={onAdd} />}</div></section>; }
@@ -146,7 +151,40 @@ function PlanningView({ projections }: { projections: { date: Date; total: numbe
 
 function SettingsView({ categories, onCategory, onCard, onAccount, onPerson }: { categories: Category[]; onCategory: () => void; onCard: () => void; onAccount: () => void; onPerson: () => void }) { return <section className="settings-grid"><div className="panel"><PanelHeading eyebrow="ORGANIZAÇÃO" title="Categorias" action="Nova categoria" onAction={onCategory} /><div className="category-list">{categories.map((item) => <span key={item.id}><i style={{ background: item.color }} />{item.name}</span>)}</div></div><div className="panel"><PanelHeading eyebrow="CADASTROS" title="Estrutura da família" /><div className="settings-actions"><button onClick={onCard}><CreditCard /><span><b>Novo cartão</b><small>Nome, cor, vencimento e limite</small></span><ChevronRight /></button><button onClick={onAccount}><WalletCards /><span><b>Nova conta</b><small>Conta usada nos pagamentos</small></span><ChevronRight /></button><button onClick={onPerson}><UserPlus /><span><b>Nova pessoa</b><small>Responsáveis e valores a devolver</small></span><ChevronRight /></button></div></div><div className="panel system-panel"><PanelHeading eyebrow="INFRAESTRUTURA" title="Proteções ativas" /><div className="system-list"><span><Check />PostgreSQL Railway <b>Ativo</b></span><span><Check />Originais no Cloudflare R2 <b>Ativo</b></span><span><Check />Assistente Groq com confirmação <b>Ativo</b></span><span><Check />Trilha de auditoria e isolamento familiar <b>Ativo</b></span></div></div><div className="panel ownership-panel"><div className="ownership-mark"><BadgeCheck /></div><div><span className="kicker">AUTORIA E TITULARIDADE</span><h2>Uma criação de Carlao Antonio de Oliveira Piquet</h2><p>Criador, titular e desenvolvedor principal do Finora.</p><a href="mailto:carlos.piquet2016@gmail.com">carlos.piquet2016@gmail.com</a></div><small>© 2026 · Software proprietário · Todos os direitos reservados</small></div></section>; }
 
-function TransactionList({ transactions, empty, detailed = false }: { transactions: Transaction[]; empty: string; detailed?: boolean }) { return transactions.length ? <div className="transaction-list">{transactions.map((item) => <div className={`transaction-row ${item.status === "CANCELED" ? "canceled" : ""}`} key={item.id}><span className="transaction-icon" style={{ background: item.card?.color || "#E2E8F0", color: item.card ? "#fff" : "#475569" }}>{item.card ? <CreditCard size={17} /> : <CircleDollarSign size={17} />}</span><div className="transaction-title"><b>{item.description}</b><small>{item.card?.name || "Sem cartão"} · {item.category}{item.responsiblePerson ? ` · ${item.responsiblePerson}` : ""}</small></div>{detailed && <span className="installment">{item.recurring ? "Fixo" : item.installmentCount > 1 ? `${item.installmentNumber}/${item.installmentCount}` : "À vista"}</span>}<span className="due">{item.dueDate ? `Vence ${shortDate.format(new Date(item.dueDate))}` : shortDate.format(new Date(item.competenceDate))}</span><strong>{money(item.amount)}</strong><span className={`status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span><div className="row-actions">{!["PAID", "CANCELED"].includes(item.status) && <button className="pay-button" onClick={() => markPaid(item.id)}><Check size={13} />Pago</button>}{item.status !== "CANCELED" && <button className="cancel-button" title="Cancelar lançamento" onClick={() => cancelTransaction(item.id)}><X size={14} /></button>}</div></div>)}</div> : <div className="empty">{empty}</div>; }
+function TransactionList({ transactions, empty }: { transactions: Transaction[]; empty: string }) {
+  const router = useRouter();
+  const [editing, setEditing] = useState<string | null>(null);
+  const [draft, setDraft] = useState({ description: "", installmentNumber: "1", installmentCount: "1", amount: "", date: "", editsDueDate: false });
+  const [message, setMessage] = useState("");
+  const [saving, startSaving] = useTransition();
+  function begin(item: Transaction) {
+    setMessage("");
+    setEditing(item.id);
+    setDraft({ description: item.description, installmentNumber: String(item.installmentNumber), installmentCount: String(item.installmentCount), amount: String(item.amount), date: dateFieldValue(item.dueDate || item.competenceDate), editsDueDate: Boolean(item.dueDate) });
+  }
+  function save(item: Transaction) {
+    startSaving(async () => {
+      const result = await updateTransaction(item.id, { ...draft, amount: Number(draft.amount), installmentNumber: Number(draft.installmentNumber), installmentCount: Number(draft.installmentCount) });
+      if (result.error) return setMessage(result.error);
+      setEditing(null);
+      setMessage("Lançamento atualizado.");
+      router.refresh();
+    });
+  }
+  if (!transactions.length) return <div className="empty">{empty}</div>;
+  return <>{message && <div className="notice transaction-edit-notice"><Check size={15} />{message}</div>}<div className="transaction-list"><div className="transaction-list-head" aria-hidden="true"><span /><span /><b>Parcelas</b><b>Data</b><b>Valor</b><span className="transaction-head-status" /><span /></div>{transactions.map((item) => editing === item.id ? <form className="transaction-row transaction-edit-row" key={item.id} onSubmit={(event) => { event.preventDefault(); save(item); }}>
+    <span className="transaction-icon" style={{ background: item.card?.color || "#E2E8F0", color: item.card ? "#fff" : "#475569" }}>{item.card ? <CreditCard size={17} /> : <CircleDollarSign size={17} />}</span>
+    <label className="transaction-edit-description"><span>Descrição</span><input value={draft.description} onChange={(event) => setDraft((current) => ({ ...current, description: event.target.value }))} autoFocus /></label>
+    <label className="transaction-edit-installment"><span>Parcela atual de total</span><span><input aria-label="Parcela atual" type="number" min="1" max="360" value={draft.installmentNumber} onChange={(event) => setDraft((current) => ({ ...current, installmentNumber: event.target.value }))} /><i>de</i><input aria-label="Total de parcelas" type="number" min="1" max="360" value={draft.installmentCount} onChange={(event) => setDraft((current) => ({ ...current, installmentCount: event.target.value }))} /></span></label>
+    <label className="transaction-edit-date"><span>{draft.editsDueDate ? "Vencimento" : "Data"}</span><input type="date" value={draft.date} onChange={(event) => setDraft((current) => ({ ...current, date: event.target.value }))} /></label>
+    <label className="transaction-edit-amount"><span>Valor (R$)</span><input type="number" min="0.01" step="0.01" value={draft.amount} onChange={(event) => setDraft((current) => ({ ...current, amount: event.target.value }))} /></label>
+    <span className={`status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span>
+    <div className="row-actions"><button className="pay-button" type="submit" disabled={saving}><Save size={13} />{saving ? "Salvando" : "Salvar"}</button><button className="cancel-button" type="button" title="Cancelar edição" onClick={() => setEditing(null)}><X size={14} /></button></div>
+  </form> : <div className={`transaction-row ${item.status === "CANCELED" ? "canceled" : ""}`} key={item.id}><span className="transaction-icon" style={{ background: item.card?.color || "#E2E8F0", color: item.card ? "#fff" : "#475569" }}>{item.card ? <CreditCard size={17} /> : <CircleDollarSign size={17} />}</span><div className="transaction-title"><b>{item.description}</b><small>{item.card?.name || "Sem cartão"} · {item.category}{item.responsiblePerson ? ` · ${item.responsiblePerson}` : ""}</small></div><button className="installment editable-value" title="Editar parcelas" onClick={() => begin(item)}>{item.recurring ? "Fixo" : item.installmentCount > 1 ? `${String(item.installmentNumber).padStart(2, "0")} de ${String(item.installmentCount).padStart(2, "0")}` : "À vista"}</button><button className="due editable-value" title="Editar data" onClick={() => begin(item)}>{item.dueDate ? `Vence ${ledgerDate.format(new Date(item.dueDate))}` : ledgerDate.format(new Date(item.competenceDate))}</button><button className="transaction-amount editable-value" title="Editar valor" onClick={() => begin(item)}>{money(item.amount)}</button><span className={`status ${item.status.toLowerCase()}`}>{statusLabel(item.status)}</span><div className="row-actions"><button className="edit-button" title="Editar parcelas, data e valor" onClick={() => begin(item)}><Pencil size={13} /></button>{!["PAID", "CANCELED"].includes(item.status) && <button className="pay-button" onClick={() => markPaid(item.id)}><Check size={13} />Pago</button>}{item.status !== "CANCELED" && <button className="cancel-button" title="Cancelar lançamento" onClick={() => cancelTransaction(item.id)}><X size={14} /></button>}</div></div>)}</div></>;
+}
+
+const ledgerDate = new Intl.DateTimeFormat("pt-BR", { day: "2-digit", month: "short", timeZone: "UTC" });
+function dateFieldValue(value: string) { return new Date(value).toISOString().slice(0, 10); }
 
 function ForecastChart({ projections, large = false }: { projections: { date: Date; total: number }[]; large?: boolean }) { const max = Math.max(...projections.map((item) => item.total), 1); return <div className={`forecast-bars ${large ? "large" : ""}`}>{projections.map((item) => <div key={item.date.toISOString()}><span>{money(item.total)}</span><i><b style={{ height: `${Math.max((item.total / max) * 100, item.total ? 3 : 0)}%` }} /></i><small>{item.date.toLocaleDateString("pt-BR", { month: "short" }).replace(".", "")}</small></div>)}</div>; }
 function PanelHeading({ eyebrow, title, action, onAction }: { eyebrow: string; title: string; action?: string; onAction?: () => void }) { return <div className="panel-heading"><div><span className="kicker">{eyebrow}</span><h2>{title}</h2></div>{action && <button onClick={onAction}>{action}<ChevronRight size={15} /></button>}</div>; }

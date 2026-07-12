@@ -2,7 +2,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { installmentSchedule, parseBrazilianMoney, parseInstallment } from "../lib/finance";
 import { parseMoney } from "../lib/workbook";
-import { calculateHealth } from "../lib/advisor";
+import { calculateHealth, groundedAdviceCopy, type AdvisorSnapshot } from "../lib/advisor";
+import { DAILY_AI_ANALYSIS_LIMIT, saoPauloUsageDate } from "../lib/ai-quota";
+import { addUtcMonths, monthStartUtc } from "../lib/format";
 
 test("parcelamento preserva o total exato em centavos", () => {
   const schedule = installmentSchedule(100, 3, new Date(2026, 6, 1));
@@ -28,4 +30,40 @@ test("semáforo só classifica quando existe renda registrada", () => {
   assert.deepEqual(calculateHealth(5000, 3500), { health: "GREEN", commitmentRate: 70 });
   assert.deepEqual(calculateHealth(5000, 4300), { health: "ORANGE", commitmentRate: 86 });
   assert.deepEqual(calculateHealth(5000, 5200), { health: "RED", commitmentRate: 104 });
+});
+
+test("conselho nunca apresenta compromissos futuros como recebimentos", () => {
+  const snapshot: AdvisorSnapshot = {
+    month: "2026-07",
+    currentMonthIncome: 0,
+    currentMonthExpenses: 1372.18,
+    currentMonthExpenseCount: 18,
+    currentMonthPaidExpenses: 0,
+    currentMonthPendingExpenses: 1372.18,
+    currentMonthUnassignedExpenses: 0,
+    currentMonthRecurringExpenses: 10,
+    categoryTotals: [],
+    cardTotals: [],
+    futureExpenseCommitments: [{ month: "2026-07", amount: 1372.18 }, { month: "2026-08", amount: 800.87 }],
+    futureExpenseCommitmentCount: 6,
+    openFamilyReimbursements: 0,
+    health: "INCOMPLETE",
+    commitmentRate: null,
+  };
+  const advice = groundedAdviceCopy(snapshot);
+  assert.match(advice.summary, /despesas já comprometidas, não recebimentos/);
+  assert.match(advice.summary, /Não há valores a receber/);
+  assert.equal(advice.insights.find((item) => item.amount === 800.87)?.title, "Despesas futuras já comprometidas");
+});
+
+test("limite diário usa a data de São Paulo", () => {
+  assert.equal(DAILY_AI_ANALYSIS_LIMIT, 5);
+  assert.equal(saoPauloUsageDate(new Date("2026-07-12T02:30:00.000Z")).toISOString(), "2026-07-11T00:00:00.000Z");
+});
+
+test("mês financeiro inclui lançamentos do primeiro dia à meia-noite", () => {
+  const july = monthStartUtc("2026-07");
+  assert.equal(july.toISOString(), "2026-07-01T00:00:00.000Z");
+  assert.equal(addUtcMonths(july, 1).toISOString(), "2026-08-01T00:00:00.000Z");
+  assert.equal(new Date("2026-07-01T00:00:00.000Z") >= july, true);
 });

@@ -42,7 +42,7 @@ const transactionSchema = z.object({
 
 export async function createTransaction(_: TransactionState, formData: FormData): Promise<TransactionState> {
   const parsed = transactionSchema.safeParse(Object.fromEntries(formData));
-  if (!parsed.success) return { error: "Confira descrição, valor e data do lançamento." };
+  if (!parsed.success) return { error: "Confira descrição, parcelas, data e valor do lançamento." };
   const { user, membership } = await requireMembership();
   if (membership.role === "VIEWER" || membership.role === "GUEST") return { error: "Seu perfil não tem permissão para criar lançamentos." };
   const data = parsed.data;
@@ -86,6 +86,44 @@ export async function cancelTransaction(transactionId: string) {
     db.auditLog.create({ data: { householdId: membership.householdId, actorId: user.id, entity: "Transaction", entityId: transactionId, action: "CANCEL", before: { status: transaction.status }, after: { status: "CANCELED" } } }),
   ]);
   revalidatePath("/");
+}
+
+const transactionEditSchema = z.object({
+  description: z.string().trim().min(2).max(120),
+  amount: z.coerce.number().positive().max(999999999999.99),
+  date: z.string().date(),
+  editsDueDate: z.boolean(),
+  installmentNumber: z.coerce.number().int().min(1).max(360),
+  installmentCount: z.coerce.number().int().min(1).max(360),
+}).superRefine((data, context) => {
+  if (data.installmentNumber > data.installmentCount) context.addIssue({ code: "custom", path: ["installmentNumber"], message: "A parcela atual não pode superar o total." });
+});
+
+export async function updateTransaction(transactionId: string, input: unknown): Promise<ActionState> {
+  const parsed = transactionEditSchema.safeParse(input);
+  if (!parsed.success) return { error: "Confira descrição, parcelas, data e valor do lançamento." };
+  const { user, membership } = await requireMembership();
+  if (["VIEWER", "GUEST"].includes(membership.role)) return { error: "Seu perfil não tem permissão para editar lançamentos." };
+  const transaction = await db.transaction.findFirst({ where: { id: transactionId, householdId: membership.householdId } });
+  if (!transaction) return { error: "Lançamento não encontrado." };
+  const date = new Date(`${parsed.data.date}T12:00:00`);
+  const dateChange = parsed.data.editsDueDate ? { dueDate: date } : { competenceDate: date };
+  const baseDescription = parsed.data.description.replace(/\s*·\s*\d+\s*\/\s*\d+\s*$/, "").trim();
+  const description = parsed.data.installmentCount > 1 ? `${baseDescription} · ${parsed.data.installmentNumber}/${parsed.data.installmentCount}` : baseDescription;
+  await db.$transaction([
+    db.transaction.update({ where: { id: transaction.id }, data: { description, amount: parsed.data.amount, installmentNumber: parsed.data.installmentNumber, installmentCount: parsed.data.installmentCount, ...dateChange } }),
+    db.auditLog.create({ data: {
+      householdId: membership.householdId,
+      actorId: user.id,
+      entity: "Transaction",
+      entityId: transaction.id,
+      action: "UPDATE",
+      before: { description: transaction.description, amount: Number(transaction.amount), installmentNumber: transaction.installmentNumber, installmentCount: transaction.installmentCount, competenceDate: transaction.competenceDate.toISOString(), dueDate: transaction.dueDate?.toISOString() ?? null },
+      after: { description, amount: parsed.data.amount, installmentNumber: parsed.data.installmentNumber, installmentCount: parsed.data.installmentCount, [parsed.data.editsDueDate ? "dueDate" : "competenceDate"]: date.toISOString() },
+    } }),
+  ]);
+  revalidatePath("/");
+  return { success: true };
 }
 
 export async function assignTransactionCard(transactionId: string, cardId: string): Promise<ActionState> {
