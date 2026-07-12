@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowDownLeft, ArrowLeft, ArrowRight, CalendarDays, Check, ChevronRight, CircleDollarSign, CreditCard, FileSpreadsheet, LayoutDashboard, LogOut, Plus, ReceiptText, Search, Settings, TrendingDown, UploadCloud, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { AlertCircle, ArrowDownLeft, ArrowLeft, ArrowRight, CalendarDays, Check, ChevronRight, CircleDollarSign, CreditCard, FileSpreadsheet, LayoutDashboard, LogOut, Menu, Plus, ReceiptText, Search, Settings, Sparkles, TrendingDown, UploadCloud, UserPlus, Users, WalletCards, X } from "lucide-react";
 import { assignTransactionCard, cancelTransaction, logout, markPaid } from "@/app/actions";
 import { money, monthLabel, shortDate } from "@/lib/format";
 import { ImportPanel } from "@/components/import-panel";
 import { ManagementModal } from "@/components/management-modal";
 import { TransactionForm } from "@/components/transaction-form";
+import { EconomicAdvisor } from "@/components/economic-advisor";
 
 type View = "overview" | "transactions" | "invoices" | "accounts" | "people" | "planning" | "import" | "settings";
 type ManagementKind = "card" | "account" | "person" | "category";
@@ -37,10 +38,13 @@ export function Dashboard(props: DashboardProps) {
   const router = useRouter();
   const [adding, setAdding] = useState(false);
   const [managing, setManaging] = useState<ManagementKind | null>(null);
+  const [advisorOpen, setAdvisorOpen] = useState(false);
+  const [mobileMenu, setMobileMenu] = useState(false);
   const [view, setView] = useState<View>("overview");
   const month = new Date(`${selectedMonth}T12:00:00`);
   useEffect(() => { const hash = window.location.hash.replace("#", "") as View; if ([...menuItems.map(item => item.id), "settings"].includes(hash)) setView(hash); }, []);
-  function navigate(next: View) { setView(next); window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${next}`); }
+  useEffect(() => { if (!mobileMenu && !advisorOpen) return; const previous = document.body.style.overflow; document.body.style.overflow = "hidden"; const close = (event: KeyboardEvent) => { if (event.key === "Escape") { setMobileMenu(false); setAdvisorOpen(false); } }; window.addEventListener("keydown", close); return () => { document.body.style.overflow = previous; window.removeEventListener("keydown", close); }; }, [mobileMenu, advisorOpen]);
+  function navigate(next: View) { setView(next); setMobileMenu(false); window.history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${next}`); }
   function changeMonth(offset: number) { const next = new Date(month.getFullYear(), month.getMonth() + offset, 1); router.push(`/?month=${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}#${view}`); }
 
   const active = transactions.filter((t) => !["CANCELED", "REFUNDED"].includes(t.status));
@@ -74,11 +78,9 @@ export function Dashboard(props: DashboardProps) {
 
     <section className="content">
       <header className="topbar">
-        <div><span className="kicker">{viewName.toUpperCase()}</span><h1>{view === "overview" ? `Olá, ${userName.split(" ")[0]}` : viewName}</h1><MonthControl month={month} previous={() => changeMonth(-1)} next={() => changeMonth(1)} /></div>
-        <div className="top-actions"><div className="user-badge"><span>{userName.charAt(0).toUpperCase()}</span><div><b>{userName}</b><small>Administrador da família</small></div></div><button className="button primary add-button" onClick={() => setAdding(true)}><Plus size={17} />Novo lançamento</button></div>
+        <div className="topbar-title"><button className="hamburger" aria-label="Abrir menu" onClick={() => { setAdvisorOpen(false); setMobileMenu(true); }}><Menu size={20} /></button><div><span className="kicker">{viewName.toUpperCase()}</span><h1>{view === "overview" ? `Olá, ${userName.split(" ")[0]}` : viewName}</h1><MonthControl month={month} previous={() => changeMonth(-1)} next={() => changeMonth(1)} /></div></div>
+        <div className="top-actions"><button className="advisor-trigger" onClick={() => { setMobileMenu(false); setAdvisorOpen(true); }}><span className="mini-orb"><i /><Sparkles size={15} /></span><div><b>Conselho Econômico</b><small>Analise antes de decidir</small></div></button><div className="user-badge"><span>{userName.charAt(0).toUpperCase()}</span><div><b>{userName}</b><small>Administrador da família</small></div></div><button className="button primary add-button" onClick={() => setAdding(true)}><Plus size={17} />Novo lançamento</button></div>
       </header>
-
-      <div className="mobile-nav">{menuItems.map((item) => <button className={view === item.id ? "active" : ""} key={item.id} onClick={() => navigate(item.id)}>{item.icon}<span>{item.short}</span></button>)}</div>
 
       {view === "overview" && <Overview month={month} total={invoiceTotal} paid={paid} pending={pending} receive={receive} transactions={expenses} groups={invoiceGroups} projections={projections.slice(0, 6)} onInvoices={() => navigate("invoices")} onTransactions={() => navigate("transactions")} onPlanning={() => navigate("planning")} onImport={() => navigate("import")} />}
       {view === "invoices" && <InvoicesView month={month} groups={invoiceGroups} total={invoiceTotal} transactions={expenses} cards={cards} />}
@@ -92,6 +94,9 @@ export function Dashboard(props: DashboardProps) {
 
     {adding && <TransactionForm accounts={accounts} cards={cards} categories={categories} people={people} onClose={() => setAdding(false)} />}
     {managing && <ManagementModal kind={managing} onClose={() => setManaging(null)} />}
+    <button className={`mobile-menu-backdrop ${mobileMenu ? "open" : ""}`} aria-label="Fechar menu" tabIndex={mobileMenu ? 0 : -1} onClick={() => setMobileMenu(false)} />
+    <aside className={`mobile-drawer ${mobileMenu ? "open" : ""}`} aria-hidden={!mobileMenu}><div className="mobile-drawer-head"><div className="brand"><span className="mark">F</span><div><b>finora</b><small>{householdName}</small></div></div><button aria-label="Fechar menu" onClick={() => setMobileMenu(false)}><X size={18} /></button></div><nav>{menuItems.map((item) => <button className={view === item.id ? "active" : ""} key={item.id} onClick={() => navigate(item.id)}>{item.icon}<span>{item.label}</span></button>)}</nav><div className="mobile-drawer-bottom"><button onClick={() => navigate("settings")}><Settings /><span>Configurações</span></button><form action={logout}><button type="submit"><LogOut /><span>Sair</span></button></form></div></aside>
+    <EconomicAdvisor open={advisorOpen} month={selectedMonth} onClose={() => setAdvisorOpen(false)} />
   </main>;
 }
 
